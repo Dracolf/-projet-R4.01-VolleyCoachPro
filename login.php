@@ -27,24 +27,35 @@ try {
         $login         = $_POST['login']    ?? '';
         $passwordInput = $_POST['password'] ?? '';
 
-        $stmt = $pdo->prepare("SELECT * FROM Utilisateur WHERE Login = :login");
-        $stmt->execute([':login' => $login]);
-        $user = $stmt->fetch(PDO::FETCH_ASSOC);
+        $url = "http://authapi.great-site.net/auth.php";
+        $data = [
+                    "login" => $login,
+                    "password" => $passwordInput
+                ];
 
-        if ($user) {
-            // On hash le mdp saisi
-            $hashedInput = hash_hmac('sha256', $passwordInput, 'ripbozo');
-            if ($hashedInput === $user['Mdp']) {
-                // Connexion OK
-                $_SESSION['user'] = $user['Login'];
-                header("Location: index.php");
-                exit;
-            } else {
-                $message = "Identifiant ou mot de passe incorrect.";
-            }
+        $ch = curl_init($url);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_POST, true);
+        curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
+        curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($data));
+
+        $response = curl_exec($ch);
+        curl_close($ch);
+
+        // Convertir la réponse JSON en tableau PHP
+        $data = json_decode($response, true);
+
+        if (isset($data['token'])) {
+            // Démarrer la session et stocker l'utilisateur
+            $_SESSION['user'] = $data['user']; // Stocker le login ou l'ID utilisateur
+            $_SESSION['token'] = $data['token']; // Stocker le JWT (utile pour les futures requêtes API)
+
+            header("Location: index.php");
+            exit;
         } else {
-            $message = "Identifiant ou mot de passe incorrect.";
+            $message = isset($data['error']) ? $data['error'] : "Échec de connexion";
         }
+
     }
 
 } catch (PDOException $e) {
