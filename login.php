@@ -12,7 +12,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['login'], $_POST['pass
     $login         = $_POST['login']    ?? '';
     $passwordInput = $_POST['password'] ?? '';
 
-    $url = "https://volleycoachpro.alwaysdata.net/authapi/auth.php";
+    $url = "https://volleycoachpro.alwaysdata.net/authapi/";
     $data = [
                 "login" => $login,
                 "password" => $passwordInput

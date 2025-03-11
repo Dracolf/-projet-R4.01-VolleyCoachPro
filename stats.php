@@ -17,7 +17,7 @@ $dateToday = date("Y-m-d H:i:s");
 $token = $_SESSION['token'];
 
 // URL de l'API
-$url = "https://volleycoachpro.alwaysdata.net/volleyapi/statistiques/statistiques.php";
+$url = "https://volleycoachpro.alwaysdata.net/volleyapi/statistiques/";
 
 // Initialisation de cURL
 $ch = curl_init($url);
