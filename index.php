@@ -5,12 +5,40 @@ if (!isset($_SESSION['user'])) {
     header("Location: login.php");
     exit;
 }
+if (!isset($_SESSION['token'])) {
+  header("Location: login.php");
+  exit;
+}
 
 // Config
 $host     = "mysql-volleycoachpro.alwaysdata.net";
 $username = "403542";
 $password = "Iutinfo!";
 $database = "volleycoachpro_bd";
+
+// Récupérer le token JWT stocké en session
+$token = $_SESSION['token'];
+
+// URL de l'API
+$url = "https://volleycoachpro.alwaysdata.net/volleyapi/statistiques/statistiques.php";
+
+// Initialisation de cURL
+$ch = curl_init($url);
+curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+curl_setopt($ch, CURLOPT_HTTPHEADER, ["Authorization: Bearer $token"]);
+
+// Exécuter la requête
+$response = curl_exec($ch);
+$http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+curl_close($ch);
+
+// Vérifier la réponse
+if ($http_code !== 200) {
+    die("Erreur lors de la récupération des statistiques.");
+}
+
+// Convertir la réponse JSON en tableau PHP
+$stats = json_decode($response, true);
 
 // Petite fonction pour calculer combien de sets chaque équipe a gagnés,
 // sans valider strictement la règle de 25 pts / 2 pts d’écart, juste un >/<.
@@ -52,36 +80,12 @@ try {
     ")->fetch(PDO::FETCH_ASSOC);
 
     // Data pour les stats
-    $reqMatchsWin = $pdo->prepare("SELECT COUNT(*) as nb FROM Rencontre WHERE (
-    (Set1_equipe > Set1_adverse) + 
-    (Set2_equipe > Set2_adverse) + 
-    (Set3_equipe > Set3_adverse) + 
-    (Set4_equipe > Set4_adverse) + 
-    (Set5_equipe > Set5_adverse)
-    ) >= 3 AND Date_rencontre < NOW()");
-    $reqMatchsWin->execute();
-    $nbMatchsWin =  $reqMatchsWin->fetchColumn();
-
-    $reqMatchsLoose = $pdo->prepare("SELECT COUNT(*) as nb FROM Rencontre WHERE (
-    (Set1_equipe < Set1_adverse) + 
-    (Set2_equipe < Set2_adverse) + 
-    (Set3_equipe < Set3_adverse) + 
-    (Set4_equipe < Set4_adverse) + 
-    (Set5_equipe < Set5_adverse)
-    ) >= 3 AND Date_rencontre < NOW()");
-    $reqMatchsLoose->execute();
-    $nbMatchsLoose =  $reqMatchsLoose->fetchColumn();
+    $nbMatchsWin = $stats['data']['nbWins'];
+    $nbMatchsLoose = $stats['data']['nbLooses'];
 
     // Calcul du "total des rencontres jouées"
     // On juge "jouée" si l'une des équipes a >= 3 sets gagnés.
-    $allMatches = $pdo->query("SELECT * FROM Rencontre")->fetchAll(PDO::FETCH_ASSOC);
-    $rencontresJouees = 0;
-    foreach ($allMatches as $m) {
-        $sets = computeSets($m);
-        if ($sets['eq'] >= 3 || $sets['ad'] >= 3) {
-            $rencontresJouees++;
-        }
-    }
+    $rencontresJouees = $stats['data']['nbMatchs'];
 } catch (PDOException $e) {
     die("Erreur de connexion à la base de données : " . $e->getMessage());
 }
