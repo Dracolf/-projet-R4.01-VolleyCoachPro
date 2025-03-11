@@ -7,10 +7,10 @@ if (!isset($_SESSION['user'])) {
 }
 
 // Config
-$host = "sql312.infinityfree.com";
-$username = "if0_37676623";
-$password = "theadmin31";
-$database = "if0_37676623_gestionvolley";
+$host     = "mysql-volleycoachpro.alwaysdata.net";
+$username = "403542";
+$password = "Iutinfo!";
+$database = "volleycoachpro_bd";
 
 // Petite fonction pour calculer combien de sets chaque équipe a gagnés,
 // sans valider strictement la règle de 25 pts / 2 pts d’écart, juste un >/<.
@@ -131,9 +131,18 @@ try {
       <h2>Prochaine rencontre</h2>
       <?php if ($prochaineRencontre): ?>
         <?php
+          $mois_fr = [
+            'January' => 'janvier', 'February' => 'février', 'March' => 'mars',
+            'April' => 'avril', 'May' => 'mai', 'June' => 'juin',
+            'July' => 'juillet', 'August' => 'août', 'September' => 'septembre',
+            'October' => 'octobre', 'November' => 'novembre', 'December' => 'décembre'
+          ];
+          
           $dt = new DateTime($prochaineRencontre['Date_rencontre']);
-          $formattedDate = strftime('%e %B %Y', $dt->getTimestamp());
-          $formattedTime = $dt->format('H\hi');
+          $formattedDate = $dt->format('j F Y'); // Ex : "10 March 2024"
+          $formattedDate = strtr($formattedDate, $mois_fr); // Remplace "March" par "mars"
+          
+          $formattedTime = $dt->format('H\hi'); // Heure au format 24h
         ?>
         <p>Nom de l'équipe : <strong><?= htmlspecialchars($prochaineRencontre['Nom_équipe']) ?></strong></p>
         <p>Date : <strong><?= htmlspecialchars(ucfirst($formattedDate)) ?></strong></p>

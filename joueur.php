@@ -9,45 +9,30 @@ if (!isset($_SESSION['user'])) {
 // user=guest ?
 $isGuest = ($_SESSION['user']==='guest');
 
-$host = "sql312.infinityfree.com";
-$username = "if0_37676623";
-$password = "theadmin31";
-$database = "if0_37676623_gestionvolley";
+$host     = "mysql-volleycoachpro.alwaysdata.net";
+$username = "403542";
+$password = "Iutinfo!";
+$database = "volleycoachpro_bd";
 
 try {
     $dsn = "mysql:host=$host;dbname=$database;charset=utf8mb4";
     $pdo = new PDO($dsn, $username, $password, [PDO::ATTR_ERRMODE=>PDO::ERRMODE_EXCEPTION]);
 
     // Récup joueurs
-    $q = $pdo->prepare("
-       SELECT *
-       FROM Joueur
-       ORDER BY Statut='Absent' ASC,
-                Statut='Blessé' ASC,
-                Statut='Actif' ASC,
-                Nom ASC
-    ");
+    $q = $pdo->prepare("SELECT * FROM Joueur ORDER BY Statut='Absent' ASC, Statut='Blessé' ASC, Statut='Actif' ASC, Nom ASC");
     $q->execute();
     $joueurs = $q->fetchAll(PDO::FETCH_ASSOC);
 
     // Gestion des commentaires
     if ($_SERVER['REQUEST_METHOD']==='POST' && isset($_POST['commentaire'],$_POST['license'])) {
         if($_SESSION['user']==='guest'){
-            // Bloquer
             die("Vous n'avez pas le droit d'ajouter un commentaire en tant qu'invité.");
         }
-        $license    = $_POST['license'];
-        $commentaire= $_POST['commentaire'];
+        $license = $_POST['license'];
+        $commentaire = $_POST['commentaire'];
 
-        $update = $pdo->prepare("
-          UPDATE Joueur
-          SET Commentaire=:c
-          WHERE Numéro_de_license=:l
-        ");
-        $update->execute([
-          ':c'=>$commentaire,
-          ':l'=>$license
-        ]);
+        $update = $pdo->prepare("UPDATE Joueur SET Commentaire=:c WHERE Numéro_de_license=:l");
+        $update->execute([':c' => $commentaire, ':l' => $license]);
 
         header("Location: joueur.php");
         exit;
@@ -65,7 +50,6 @@ try {
   <link rel="stylesheet" href="styles.css">
   <script>
   function openModal(license){
-    // Si c'est guest => rien
     <?php if($isGuest): ?>
       alert("Vous n'avez pas le droit d'ajouter/modifier un commentaire en tant qu'invité.");
       return;
@@ -73,8 +57,7 @@ try {
 
     const m = document.getElementById('modal');
     m.style.display='flex';
-    docum
-    ent.getElementById('licenseInput').value=license;
+    document.getElementById('licenseInput').value=license;
   }
   function closeModal(){
     document.getElementById('modal').style.display='none';
@@ -120,20 +103,19 @@ try {
       <tbody>
       <?php foreach($joueurs as $j): ?>
         <tr>
-          <td><?= htmlspecialchars($j['Numéro_de_license']) ?></td>
-          <td><?= htmlspecialchars($j['Nom']) ?></td>
-          <td><?= htmlspecialchars($j['Prénom']) ?></td>
-          <td><?= htmlspecialchars($j['Date_de_naissance']) ?></td>
-          <td><?= htmlspecialchars($j['Taille']) ?></td>
-          <td><?= htmlspecialchars($j['Poids']) ?></td>
-          <td><?= htmlspecialchars($j['Commentaire']) ?></td>
-          <td><?= htmlspecialchars($j['Statut']) ?></td>
+          <td><?= htmlspecialchars($j['Numéro_de_license'] ?? '', ENT_QUOTES, 'UTF-8') ?></td>
+          <td><?= htmlspecialchars($j['Nom'] ?? '', ENT_QUOTES, 'UTF-8') ?></td>
+          <td><?= htmlspecialchars($j['Prénom'] ?? '', ENT_QUOTES, 'UTF-8') ?></td>
+          <td><?= htmlspecialchars($j['Date_de_naissance'] ?? '', ENT_QUOTES, 'UTF-8') ?></td>
+          <td><?= htmlspecialchars($j['Taille'] ?? '', ENT_QUOTES, 'UTF-8') ?></td>
+          <td><?= htmlspecialchars($j['Poids'] ?? '', ENT_QUOTES, 'UTF-8') ?></td>
+          <td><?= htmlspecialchars($j['Commentaire'] ?? '', ENT_QUOTES, 'UTF-8') ?></td>
+          <td><?= htmlspecialchars($j['Statut'] ?? '', ENT_QUOTES, 'UTF-8') ?></td>
           <td>
-            <!-- Bouton "Ajouter un commentaire" -->
             <button
                 <?= ($isGuest ? 'disabled' : '') ?>
                 class="button-comment <?= ($isGuest ? 'button-disabled' : '') ?>"
-                onclick="openModal('<?= htmlspecialchars($j['Numéro_de_license']) ?>')"
+                onclick="openModal('<?= htmlspecialchars($j['Numéro_de_license'] ?? '', ENT_QUOTES, 'UTF-8') ?>')"
             >
                 Ajouter un commentaire
             </button>
@@ -160,7 +142,6 @@ try {
 <?php endif; ?>
 </div>
 
-<!-- Modal -->
 <div id="modal" class="modal">
   <div class="modal-content">
     <h2>Ajouter un Commentaire</h2>

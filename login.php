@@ -7,59 +7,40 @@ if (isset($_SESSION['user'])) {
     exit;
 }
 
-// Informations de connexion à la base de données
-$host     = "sql312.infinityfree.com";
-$username = "if0_37676623";
-$password = "theadmin31";
-$database = "if0_37676623_gestionvolley";
+// Formulaire standard (login + pass)
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['login'], $_POST['password'])) {
+    $login         = $_POST['login']    ?? '';
+    $passwordInput = $_POST['password'] ?? '';
 
-$message = "";
+    $url = "https://volleycoachpro.alwaysdata.net/authapi/auth.php";
+    $data = [
+                "login" => $login,
+                "password" => $passwordInput
+            ];
 
-// Connexion PDO
-try {
-    $dsn = "mysql:host=$host;dbname=$database;charset=utf8mb4";
-    $pdo = new PDO($dsn, $username, $password, [
-        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION
-    ]);
+    $ch = curl_init($url);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_POST, true);
+    curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
+    curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($data));
 
-    // Formulaire standard (login + pass)
-    if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['login'], $_POST['password'])) {
-        $login         = $_POST['login']    ?? '';
-        $passwordInput = $_POST['password'] ?? '';
+    $response = curl_exec($ch);
+    curl_close($ch);
 
-        $url = "http://authapi.great-site.net/auth.php";
-        $data = [
-                    "login" => $login,
-                    "password" => $passwordInput
-                ];
+    // Convertir la réponse JSON en tableau PHP
+    $data = json_decode($response, true);
 
-        $ch = curl_init($url);
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_POST, true);
-        curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
-        curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($data));
+    if (isset($data['token'])) {
+        // Démarrer la session et stocker l'utilisateur
+        $_SESSION['user'] = $data['user']; // Stocker le login ou l'ID utilisateur
+        $_SESSION['token'] = $data['token']; // Stocker le JWT (utile pour les futures requêtes API)
 
-        $response = curl_exec($ch);
-        curl_close($ch);
-
-        // Convertir la réponse JSON en tableau PHP
-        $data = json_decode($response, true);
-
-        if (isset($data['token'])) {
-            // Démarrer la session et stocker l'utilisateur
-            $_SESSION['user'] = $data['user']; // Stocker le login ou l'ID utilisateur
-            $_SESSION['token'] = $data['token']; // Stocker le JWT (utile pour les futures requêtes API)
-
-            header("Location: index.php");
-            exit;
-        } else {
-            $message = isset($data['error']) ? $data['error'] : "Échec de connexion";
-        }
-
+        header("Location: index.php");
+        exit;
+    } else {
+        $message = isset($data['error']) ? $data['error'] : "Échec de connexion";
     }
 
-} catch (PDOException $e) {
-    die("Erreur de connexion : " . $e->getMessage());
 }
 ?>
 <!DOCTYPE html>

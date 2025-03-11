@@ -13,10 +13,10 @@ if ($_SESSION['user'] === 'guest') {
 
 
 // Informations de connexion
-$host = "sql312.infinityfree.com";
-$username = "if0_37676623";
-$password = "theadmin31";
-$database = "if0_37676623_gestionvolley";
+$host     = "mysql-volleycoachpro.alwaysdata.net";
+$username = "403542";
+$password = "Iutinfo!";
+$database = "volleycoachpro_bd";
 
 $message = "";
 $error = false;
