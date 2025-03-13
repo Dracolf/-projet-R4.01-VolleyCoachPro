@@ -55,7 +55,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['commentaire'], $_POST
     $statut = $_POST['statut'];
     $commentaire = $_POST['commentaire'];
 
-    $update_url = "https://volleycoachpro.alwaysdata.net/volleyapi/joueurs/$licence";
+    $update_url = "https://volleycoachpro.alwaysdata.net/volleyapi/joueurs/l$licence";
     $update_data = json_encode([
         "nom" => $nom,
         "prenom" => $prenom,

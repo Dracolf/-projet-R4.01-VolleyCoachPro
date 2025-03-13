@@ -4,6 +4,10 @@ if (!isset($_SESSION['user'])) {
     header("Location: login.php");
     exit;
 }
+if (!isset($_SESSION['token'])) {
+    header("Location: login.php");
+    exit;
+}
 
 // Bloquer si c’est guest
 if ($_SESSION['user'] === 'guest') {
