@@ -15,6 +15,26 @@ if ($_SESSION['user'] === 'guest') {
     exit;
 }
 
+$token = $_SESSION['token'];
+$api_url = "https://volleycoachpro.alwaysdata.net/volleyapi/joueurs/";
+
+function sendCurlRequest($url, $method, $token, $data = null) {
+    $ch = curl_init($url);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_CUSTOMREQUEST, $method);
+    curl_setopt($ch, CURLOPT_HTTPHEADER, [
+        "Authorization: Bearer $token",
+        "Content-Type: application/json"
+    ]);
+    if ($data) {
+        curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($data));
+    }
+    $response = curl_exec($ch);
+    $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+
+    return ["code" => $http_code, "response" => json_decode($response, true)];
+}
 
 // Informations de connexion
 $host     = "mysql-volleycoachpro.alwaysdata.net";
@@ -39,96 +59,50 @@ try {
 
     if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $action = $_POST['action'];
-
-        // === AJOUT d'un joueur ===
+    
+        // Récupération des données du formulaire
+        $id            = $_POST['IdJoueur'];
+        $license       = $_POST['license'];
+        $nom           = $_POST['nom'];
+        $prenom        = $_POST['prenom'];
+        $dateNaissance = $_POST['date_naissance'];
+        $taille        = $_POST['taille'];
+        $poids         = $_POST['poids'];
+        $commentaire   = $_POST['commentaire'];
+        $statut        = $_POST['statut'];
+    
+        $data = [
+            "licence"    => $license,
+            "nom"        => $nom,
+            "prenom"     => $prenom,
+            "naissance"  => $dateNaissance,
+            "taille"     => $taille,
+            "poids"      => $poids,
+            "commentaire"=> $commentaire,
+            "statut"     => $statut
+        ];
+    
         if ($action === 'add') {
-            $license       = $_POST['license'];
-            $nom           = $_POST['nom'];
-            $prenom        = $_POST['prenom'];
-            $dateNaissance = $_POST['date_naissance'];
-            $taille        = $_POST['taille'];
-            $poids         = $_POST['poids'];
-            $commentaire   = $_POST['commentaire'];
-            $statut        = $_POST['statut'];
-
-            try {
-                $insertQuery = $pdo->prepare("
-                    INSERT INTO Joueur (
-                        Numéro_de_license, Nom, Prénom, Date_de_naissance, Taille, Poids, Commentaire, Statut
-                    ) VALUES (
-                        :license, :nom, :prenom, :dnaiss, :taille, :poids, :comm, :statut
-                    )
-                ");
-                $insertQuery->execute([
-                    ':license' => $license,
-                    ':nom' => $nom,
-                    ':prenom' => $prenom,
-                    ':dnaiss' => $dateNaissance,
-                    ':taille' => $taille,
-                    ':poids' => $poids,
-                    ':comm' => $commentaire,
-                    ':statut' => $statut
-                ]);
-                $message = "Nouveau joueur ajouté avec succès.";
-                $error = false;
-
-            } catch (PDOException $e) {
-                // Vérifier si c'est un duplicat
-                if (strpos($e->getMessage(), 'Duplicate entry') !== false) {
-                    // Doublon sur la licence
-                    $duplicateError = "Le numéro de licence $license est déjà utilisé. Veuillez en choisir un autre.";
-                } else {
-                    // Autre erreur
-                    throw $e; // Laisser remonter l'exception
-                }
+            // --- AJOUT D’UN JOUEUR ---
+            $result = sendCurlRequest($api_url, "POST", $token, $data);
+        } elseif ($action === 'update') {
+            // --- MODIFICATION D’UN JOUEUR ---
+            $result = sendCurlRequest($api_url . $id, "PUT", $token, $data);
+        }
+    
+        // Gestion des réponses de l’API
+        if ($result["code"] === 200) {
+            $message = ($action === 'add') ? "Nouveau joueur ajouté avec succès." : "Le joueur a été mis à jour avec succès.";
+            $error = false;
+        } else {
+            $error = true;
+            if ($result["code"] === 400 && isset($result["response"]["status_message"])) {
+                $duplicateError = $result["response"]["status_message"];
+            } else {
+                $message = "Erreur lors de l’opération sur le joueur.";
             }
         }
-
-        // === MODIFICATION d'un joueur ===
-        else if ($action === 'update') {
-            $license       = $_POST['license'];
-            $nom           = $_POST['nom'];
-            $prenom        = $_POST['prenom'];
-            $dateNaissance = $_POST['date_naissance'];
-            $taille        = $_POST['taille'];
-            $poids         = $_POST['poids'];
-            $commentaire   = $_POST['commentaire'];
-            $statut        = $_POST['statut'];
-
-            try {
-                $updateQuery = $pdo->prepare("
-                    UPDATE Joueur
-                    SET Nom = :nom,
-                        Prénom = :prenom,
-                        Date_de_naissance = :dnaiss,
-                        Taille = :taille,
-                        Poids = :poids,
-                        Commentaire = :comm,
-                        Statut = :statut
-                    WHERE Numéro_de_license = :license
-                ");
-                $updateQuery->execute([
-                    ':nom' => $nom,
-                    ':prenom' => $prenom,
-                    ':dnaiss' => $dateNaissance,
-                    ':taille' => $taille,
-                    ':poids' => $poids,
-                    ':comm' => $commentaire,
-                    ':statut' => $statut,
-                    ':license' => $license
-                ]);
-                $message = "Le joueur a été mis à jour avec succès.";
-                $error = false;
-            
-            } catch (PDOException $e) {
-                // Idem, si vous voulez empêcher de changer la licence vers une existante
-                if (strpos($e->getMessage(), 'Duplicate entry') !== false) {
-                    $duplicateError = "Le numéro de licence $license est déjà utilisé par un autre joueur.";
-                } else {
-                    throw $e;
-                }
-            }
-        }
+    }
 
         // === SUPPRESSION avec remplacement + GESTION DES CONFLITS ===
         else if ($action === 'delete_with_replacement') {
@@ -209,16 +183,18 @@ try {
                     $error = false;
                 }
             }
-        }
     }
 
     // --------------------------------------------------------------------------------
     // 2) RÉCUPÉRATION DES DONNÉES POUR AFFICHAGE
     // --------------------------------------------------------------------------------
 
-    $query = $pdo->prepare("SELECT * FROM Joueur ORDER BY Nom ASC");
-    $query->execute();
-    $joueurs = $query->fetchAll(PDO::FETCH_ASSOC);
+    // Récupérer la liste des joueurs
+    $joueurs = sendCurlRequest($api_url, "GET", $token, null);
+    if ($joueurs['code'] !== 200) {
+        die("Erreur lors de la récupération des joueurs.");
+    }
+    $joueurs = $joueurs['response']['data'];
 
 } catch (PDOException $e) {
     die("Erreur de connexion ou d'exécution : " . $e->getMessage());
@@ -248,6 +224,7 @@ try {
     ); ?>;
 
     function openModal(action, data = {}) {
+        console.log("Données reçues par openModal:", data); // Vérification des données reçues
         const modal = document.getElementById('modal');
         modal.style.display = 'flex';
 
@@ -257,30 +234,23 @@ try {
             : "Modifier un joueur";
 
         document.getElementById('action').value = action;
+        document.getElementById('IdJoueur').value = data.id || ''; // Vérification ici
 
         if (action === 'add') {
-            // Formulaire vierge
             document.getElementById('license').value = '';
             document.getElementById('license').readOnly = false;
-            document.getElementById('nom').value = '';
-            document.getElementById('prenom').value = '';
-            document.getElementById('date_naissance').value = '';
-            document.getElementById('taille').value = '';
-            document.getElementById('poids').value = '';
-            document.getElementById('commentaire').value = '';
-            document.getElementById('statut').value = 'Actif';
         } else {
-            // "update"
             document.getElementById('license').value = data.license || '';
             document.getElementById('license').readOnly = true;
-            document.getElementById('nom').value = data.nom || '';
-            document.getElementById('prenom').value = data.prenom || '';
-            document.getElementById('date_naissance').value = data.date_naissance || '';
-            document.getElementById('taille').value = data.taille || '';
-            document.getElementById('poids').value = data.poids || '';
-            document.getElementById('commentaire').value = data.commentaire || '';
-            document.getElementById('statut').value = data.statut || 'Actif';
         }
+
+        document.getElementById('nom').value = data.nom || '';
+        document.getElementById('prenom').value = data.prenom || '';
+        document.getElementById('date_naissance').value = data.date_naissance || '';
+        document.getElementById('taille').value = data.taille || '';
+        document.getElementById('poids').value = data.poids || '';
+        document.getElementById('commentaire').value = data.commentaire || '';
+        document.getElementById('statut').value = data.statut || 'Actif';
     }
 
     function closeModal() {
@@ -430,6 +400,7 @@ try {
                                 <!-- Bouton "Modifier" -->
                                 <button class="button-edit" 
                                     data-player='<?= json_encode([
+                                        'id'             => $joueur['IdJoueur'],
                                         'license'        => $joueur['Numéro_de_license'],
                                         'nom'            => $joueur['Nom'],
                                         'prenom'         => $joueur['Prénom'],
@@ -467,6 +438,7 @@ try {
             <form method="POST">
                 <input type="hidden" name="action" id="action">
                 
+                <input type="hidden" name="IdJoueur" id="IdJoueur">
                 <label>Numéro de Licence : 
                     <input type="text" name="license" id="license" maxlength="6" required pattern="\d{6}">
                 </label>

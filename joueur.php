@@ -41,11 +41,12 @@ $data = json_decode($response, true);
 $joueurs = $data['data'];
 
 // Gestion des commentaires via l'API de gestion
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['commentaire'], $_POST['licence'])) {
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['commentaire'], $_POST['IdJoueur'])) {
     if ($_SESSION['user'] === 'guest') {
         die("Vous n'avez pas le droit d'ajouter un commentaire en tant qu'invité.");
     }
 
+    $IdJoueur = $_POST['IdJoueur'];
     $licence = $_POST['licence'];
     $nom = $_POST['nom'];
     $prenom = $_POST['prenom'];
@@ -55,8 +56,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['commentaire'], $_POST
     $statut = $_POST['statut'];
     $commentaire = $_POST['commentaire'];
 
-    $update_url = "https://volleycoachpro.alwaysdata.net/volleyapi/joueurs/l$licence";
+    $update_url = "https://volleycoachpro.alwaysdata.net/volleyapi/joueurs/$IdJoueur";
     $update_data = json_encode([
+        "licence" => $licence,
         "nom" => $nom,
         "prenom" => $prenom,
         "naissance" => $naissance,
@@ -95,7 +97,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['commentaire'], $_POST
   <title>Liste des Joueurs</title>
   <link rel="stylesheet" href="styles.css">
   <script>
-  function openModal(licence, nom, prenom, naissance, taille, poids, statut){
+  function openModal(id, licence, nom, prenom, naissance, taille, poids, statut){
     <?php if($isGuest): ?>
       alert("Vous n'avez pas le droit d'ajouter/modifier un commentaire en tant qu'invité.");
       return;
@@ -103,6 +105,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['commentaire'], $_POST
 
     const m = document.getElementById('modal');
     m.style.display='flex';
+    document.getElementById('idInput').value=id;
     document.getElementById('licenceInput').value=licence;
     document.getElementById('nomInput').value = nom;
     document.getElementById('prenomInput').value = prenom;
@@ -168,6 +171,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['commentaire'], $_POST
                 <?= ($isGuest ? 'disabled' : '') ?>
                 class="button-comment <?= ($isGuest ? 'button-disabled' : '') ?>"
                 onclick="openModal(
+                '<?= htmlspecialchars($j['IdJoueur'] ?? '', ENT_QUOTES, 'UTF-8') ?>',
                 '<?= htmlspecialchars($j['Numéro_de_license'] ?? '', ENT_QUOTES, 'UTF-8') ?>',
                 '<?= htmlspecialchars($j['Nom'] ?? '', ENT_QUOTES, 'UTF-8') ?>',
                 '<?= htmlspecialchars($j['Prénom'] ?? '', ENT_QUOTES, 'UTF-8') ?>',
@@ -206,6 +210,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['commentaire'], $_POST
   <div class="modal-content">
     <h2>Ajouter un Commentaire</h2>
     <form method="POST">
+      <input type="hidden" name="IdJoueur" id="idInput">
       <input type="hidden" name="licence" id="licenceInput">
       <input type="hidden" name="nom" id="nomInput">
       <input type="hidden" name="prenom" id="prenomInput">
