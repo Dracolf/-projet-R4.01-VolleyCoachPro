@@ -5,7 +5,7 @@ if (!isset($_SESSION['user'])) {
     exit;
 }
 if (!isset($_SESSION['token'])) {
-    header("Location: login.php");
+    header("Location: logout.php");
     exit;
 }
 
@@ -36,41 +36,24 @@ function sendCurlRequest($url, $method, $token, $data = null) {
     return ["code" => $http_code, "response" => json_decode($response, true)];
 }
 
-// Informations de connexion
-$host     = "mysql-volleycoachpro.alwaysdata.net";
-$username = "403542";
-$password = "Iutinfo!";
-$database = "volleycoachpro_bd";
-
 $message = "";
 $error = false;
-
-// Cette variable contiendra un message d'erreur à afficher dans une modale
 $duplicateError = "";
 
-try {
-    $dsn = "mysql:host=$host;dbname=$database;charset=utf8mb4";
-    $pdo = new PDO($dsn, $username, $password);
-    $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
+    $action = $_POST['action'];
+    $result = null; // Évite les "Undefined variable"
 
-    // --------------------------------------------------------------------------------
-    // 1) TRAITEMENT DES FORMULAIRES (ADD / UPDATE / DELETE+REPLACEMENT)
-    // --------------------------------------------------------------------------------
+    if ($action === 'add' || $action === 'update') {
+        $license       = $_POST['license']       ?? null;
+        $nom           = $_POST['nom']           ?? null;
+        $prenom        = $_POST['prenom']        ?? null;
+        $dateNaissance = $_POST['date_naissance'] ?? null;
+        $taille        = $_POST['taille']        ?? null;
+        $poids         = $_POST['poids']         ?? null;
+        $commentaire   = $_POST['commentaire']   ?? null;
+        $statut        = $_POST['statut']        ?? null;
 
-    if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
-        $action = $_POST['action'];
-    
-        // Récupération des données du formulaire
-        $id            = $_POST['IdJoueur'];
-        $license       = $_POST['license'];
-        $nom           = $_POST['nom'];
-        $prenom        = $_POST['prenom'];
-        $dateNaissance = $_POST['date_naissance'];
-        $taille        = $_POST['taille'];
-        $poids         = $_POST['poids'];
-        $commentaire   = $_POST['commentaire'];
-        $statut        = $_POST['statut'];
-    
         $data = [
             "licence"    => $license,
             "nom"        => $nom,
@@ -81,124 +64,52 @@ try {
             "commentaire"=> $commentaire,
             "statut"     => $statut
         ];
-    
-        if ($action === 'add') {
-            // --- AJOUT D’UN JOUEUR ---
-            $result = sendCurlRequest($api_url, "POST", $token, $data);
-        } elseif ($action === 'update') {
-            // --- MODIFICATION D’UN JOUEUR ---
-            $result = sendCurlRequest($api_url . $id, "PUT", $token, $data);
-        }
-    
-        // Gestion des réponses de l’API
-        if ($result["code"] === 200) {
-            $message = ($action === 'add') ? "Nouveau joueur ajouté avec succès." : "Le joueur a été mis à jour avec succès.";
-            $error = false;
+    }
+
+    if ($action === 'add') {
+        $result = sendCurlRequest($api_url, "POST", $token, $data);
+    } elseif ($action === 'update') {
+        $id = $_POST['IdJoueur'] ?? null;
+        if ($id) {
+            $result = sendCurlRequest($api_url . "$id", "PUT", $token, $data);
         } else {
+            $message = "ID du joueur manquant.";
             $error = true;
-            if ($result["code"] === 400 && isset($result["response"]["status_message"])) {
-                $duplicateError = $result["response"]["status_message"];
-            } else {
-                $message = "Erreur lors de l’opération sur le joueur.";
-            }
+        }
+    } elseif ($action === 'delete') {
+        $id = $_POST['id_joueur_to_remove'] ?? null;
+        if ($id) {
+            $result = sendCurlRequest($api_url . "$id", "DELETE", $token);
+        } else {
+            $message = "ID du joueur manquant.";
+            $error = true;
         }
     }
 
-        // === SUPPRESSION avec remplacement + GESTION DES CONFLITS ===
-        else if ($action === 'delete_with_replacement') {
-            $idJoueurToRemove    = $_POST['id_joueur_to_remove'] ?? null;
-            $idJoueurRemplacant  = $_POST['id_joueur_remplacant'] ?? null;
-
-            if (!$idJoueurToRemove || !$idJoueurRemplacant) {
-                $message = "Informations manquantes pour la suppression.";
-                $error = true;
-            } else {
-                // Vérif existence du joueur à supprimer
-                $checkQuery = $pdo->prepare("SELECT * FROM Joueur WHERE IdJoueur = :idRemove");
-                $checkQuery->execute([':idRemove' => $idJoueurToRemove]);
-                $joueurToRemove = $checkQuery->fetch(PDO::FETCH_ASSOC);
-
-                if (!$joueurToRemove) {
-                    $message = "Le joueur à supprimer n'existe pas (Id: $idJoueurToRemove).";
-                    $error = true;
-                } else {
-                    // 1) Récupérer toutes les participations du joueur à supprimer
-                    $participQuery = $pdo->prepare("
-                        SELECT IdRencontre
-                        FROM Participer
-                        WHERE IdJoueur = :old
-                    ");
-                    $participQuery->execute([':old' => $idJoueurToRemove]);
-                    $participations = $participQuery->fetchAll(PDO::FETCH_COLUMN);
-
-                    // 2) Pour chaque match, vérifier si le remplaçant y est déjà
-                    foreach ($participations as $idRencontre) {
-                        $checkDouble = $pdo->prepare("
-                            SELECT COUNT(*) 
-                            FROM Participer
-                            WHERE IdRencontre = :idR
-                              AND IdJoueur = :remplacant
-                        ");
-                        $checkDouble->execute([
-                            ':idR' => $idRencontre,
-                            ':remplacant' => $idJoueurRemplacant
-                        ]);
-                        $alreadyPresent = $checkDouble->fetchColumn();
-
-                        if ($alreadyPresent > 0) {
-                            // Le remplaçant joue déjà dans ce match
-                            // => on supprime la participation du joueur à retirer
-                            $deleteParticipation = $pdo->prepare("
-                                DELETE FROM Participer
-                                WHERE IdRencontre = :idR
-                                  AND IdJoueur = :old
-                            ");
-                            $deleteParticipation->execute([
-                                ':idR' => $idRencontre,
-                                ':old' => $idJoueurToRemove
-                            ]);
-                        } else {
-                            // Sinon, on transfère la participation
-                            $updateParticipation = $pdo->prepare("
-                                UPDATE Participer
-                                SET IdJoueur = :remplacant
-                                WHERE IdRencontre = :idR
-                                  AND IdJoueur = :old
-                            ");
-                            $updateParticipation->execute([
-                                ':remplacant' => $idJoueurRemplacant,
-                                ':idR' => $idRencontre,
-                                ':old' => $idJoueurToRemove
-                            ]);
-                        }
-                    }
-
-                    // 3) Supprimer le joueur de la table Joueur
-                    $deleteQuery = $pdo->prepare("
-                        DELETE FROM Joueur WHERE IdJoueur = :idRemove
-                    ");
-                    $deleteQuery->execute([':idRemove' => $idJoueurToRemove]);
-
-                    $message = "Joueur supprimé. Participations transférées ou supprimées pour éviter les doublons.";
-                    $error = false;
-                }
-            }
+    // Vérification avant d’accéder à $result
+    if ($result !== null && $result["code"] === 200) {
+        $message = match ($action) {
+            'add' => "Nouveau joueur ajouté avec succès.",
+            'update' => "Le joueur a été mis à jour avec succès.",
+            'delete' => "Le joueur a été supprimé avec succès.",
+            default => "Opération réussie."
+        };
+        $error = false;
+    } elseif ($result !== null) {
+        $error = true;
+        if ($result["code"] === 400 && isset($result["response"]["status_message"])) {
+            $duplicateError = $result["response"]["status_message"];
+        } else {
+            $message = "Erreur lors de l’opération sur le joueur.";
+        }
     }
-
-    // --------------------------------------------------------------------------------
-    // 2) RÉCUPÉRATION DES DONNÉES POUR AFFICHAGE
-    // --------------------------------------------------------------------------------
-
-    // Récupérer la liste des joueurs
-    $joueurs = sendCurlRequest($api_url, "GET", $token, null);
-    if ($joueurs['code'] !== 200) {
-        die("Erreur lors de la récupération des joueurs.");
-    }
-    $joueurs = $joueurs['response']['data'];
-
-} catch (PDOException $e) {
-    die("Erreur de connexion ou d'exécution : " . $e->getMessage());
 }
+
+$joueurs = sendCurlRequest($api_url, "GET", $token, null);
+if ($joueurs['code'] !== 200) {
+    die("Erreur lors de la récupération des joueurs.");
+}
+$joueurs = $joueurs['response']['data'];
 ?>
 
 <!DOCTYPE html>
@@ -292,7 +203,7 @@ try {
         deleteButtons.forEach(button => {
             button.addEventListener('click', () => {
                 const idJoueur = button.getAttribute('data-idjoueur');
-                openReplacementModal(idJoueur);
+                openDeleteModal(idJoueur);
             });
         });
     }
@@ -313,32 +224,13 @@ try {
         }
     });
 
-    // Suppression + Remplacement
-    async function openReplacementModal(idJoueurToRemove) {
+    // Suppression
+    function openDeleteModal(idJoueurToRemove) {
         document.getElementById('delete-modal').style.display = 'flex';
         document.getElementById('id_joueur_to_remove').value = idJoueurToRemove;
-
-        const url = `valid_replacements.php?idToRemove=${idJoueurToRemove}`;
-        try {
-            const response = await fetch(url);
-            if (!response.ok) throw new Error('Erreur réseau');
-            const validReplacers = await response.json();
-
-            const select = document.getElementById('id_joueur_remplacant');
-            select.innerHTML = '';
-            for (let v of validReplacers) {
-                let opt = document.createElement('option');
-                opt.value = v.IdJoueur;
-                opt.textContent = v.Nom + ' ' + v.Prénom;
-                select.appendChild(opt);
-            }
-        } catch (err) {
-            console.error('Erreur fetch validReplacements:', err);
-            const select = document.getElementById('id_joueur_remplacant');
-            select.innerHTML = '<option value="">(Erreur de chargement)</option>';
-        }
     }
-    function closeReplacementModal() {
+
+    function closeDeleteModal() {
         document.getElementById('delete-modal').style.display = 'none';
     }
   </script>
@@ -476,25 +368,20 @@ try {
         </div>
     </div>
 
-    <!-- Modale SUPPRESSION + CHOIX DU REMPLAÇANT -->
+    <!-- Modale SUPPRESSION -->
     <div id="delete-modal" class="modal">
         <div class="modal-content">
             <h2>Supprimer un joueur</h2>
-            <p>Choisissez le joueur remplaçant pour toutes ses participations :</p>
+            <p>Êtes-vous sûr de vouloir supprimer ce joueur ?</p>
 
             <form method="POST" action="">
-                <input type="hidden" name="action" value="delete_with_replacement">
+                <input type="hidden" name="action" value="delete">
                 <!-- On stocke ici l'IdJoueur à supprimer -->
                 <input type="hidden" name="id_joueur_to_remove" id="id_joueur_to_remove">
 
-                <label for="id_joueur_remplacant">Remplaçant :</label>
-                <select name="id_joueur_remplacant" id="id_joueur_remplacant" required>
-                    <!-- Rempli dynamiquement via JS (fetch valid_replacements.php) -->
-                </select>
-
                 <div class="modal-actions" style="margin-top:20px;">
                     <button type="submit" class="btn btn-primary">Confirmer la suppression</button>
-                    <button type="button" class="btn btn-secondary" onclick="closeReplacementModal()">Annuler</button>
+                    <button type="button" class="btn btn-secondary" onclick="closeDeleteModal()">Annuler</button>
                 </div>
             </form>
         </div>

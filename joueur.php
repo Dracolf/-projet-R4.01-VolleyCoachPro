@@ -6,7 +6,7 @@ if (!isset($_SESSION['user'])) {
     exit;
 }
 if (!isset($_SESSION['token'])) {
-  header("Location: login.php");
+  header("Location: logout.php");
   exit;
 }
 
