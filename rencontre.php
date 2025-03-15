@@ -7,6 +7,32 @@ if(!isset($_SESSION['user'])){
   exit;
 }
 
+if(!isset($_SESSION['token'])){
+  header("Location: logout.php");
+  exit;
+}
+
+$token = $_SESSION['token'];
+$api_url = "https://volleycoachpro.alwaysdata.net/volleyapi/matchs/";
+
+function sendCurlRequest($url, $method, $token, $data = null) {
+    $ch = curl_init($url);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_CUSTOMREQUEST, $method);
+    curl_setopt($ch, CURLOPT_HTTPHEADER, [
+        "Authorization: Bearer $token",
+        "Content-Type: application/json"
+    ]);
+    if ($data) {
+        curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($data));
+    }
+    $response = curl_exec($ch);
+    $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+
+    return ["code" => $http_code, "response" => json_decode($response, true)];
+}
+
 // Paramètres BDD
 $host     = "mysql-volleycoachpro.alwaysdata.net";
 $username = "403542";
@@ -143,8 +169,11 @@ try {
     }
 
     // Récup la liste des rencontres
-    $stmt=$pdo->query("SELECT * FROM Rencontre ORDER BY Date_rencontre DESC");
-    $rencontres=$stmt->fetchAll(PDO::FETCH_ASSOC);
+    $rencontres = sendCurlRequest($api_url, "GET", $token, null);
+    if ($rencontres['code'] !== 200) {
+        die("Erreur lors de la récupération des recontres.");
+    }
+    $rencontres = $rencontres['response']['data'];
 
 } catch(PDOException $e){
     die("Erreur BDD: ".$e->getMessage());
