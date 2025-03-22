@@ -107,7 +107,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 
 $joueurs = sendCurlRequest($api_url, "GET", $token, null);
 if ($joueurs['code'] !== 200) {
-    die("Erreur lors de la récupération des joueurs.");
+    header("Location: logout.php");
 }
 $joueurs = $joueurs['response']['data'];
 ?>

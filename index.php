@@ -34,7 +34,7 @@ curl_close($ch);
 
 // Vérifier la réponse
 if ($http_code !== 200) {
-    die("Erreur lors de la récupération des statistiques.");
+    header("Location: logout.php");
 }
 
 // Convertir la réponse JSON en tableau PHP

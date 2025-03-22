@@ -304,7 +304,7 @@ try {
     // Récup listes de rencontres
     $rencontres = sendCurlRequest($api_url, "GET", $token, null);
     if ($rencontres['code'] !== 200) {
-        die("Erreur lors de la récupération des recontres.");
+        header("Location: logout.php");
     }
     $rencontres = $rencontres['response']['data'];
 
