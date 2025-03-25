@@ -10,85 +10,76 @@ if (!isset($_SESSION['token'])) {
   exit;
 }
 
-// Config
-$host     = "mysql-volleycoachpro.alwaysdata.net";
-$username = "403542";
-$password = "Iutinfo!";
-$database = "volleycoachpro_bd";
-
-// Récupérer le token JWT stocké en session
 $token = $_SESSION['token'];
+$api_url = "https://volleycoachpro.alwaysdata.net/volleyapi/";
 
-// URL de l'API
-$url = "https://volleycoachpro.alwaysdata.net/volleyapi/statistiques/";
+function sendCurlRequest($url, $method, $token, $data = null) {
+    $ch = curl_init($url);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_CUSTOMREQUEST, $method);
+    curl_setopt($ch, CURLOPT_HTTPHEADER, [
+        "Authorization: Bearer $token",
+        "Content-Type: application/json"
+    ]);
+    if ($data) {
+        curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($data));
+    }
+    $response = curl_exec($ch);
+    $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
 
-// Initialisation de cURL
-$ch = curl_init($url);
-curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-curl_setopt($ch, CURLOPT_HTTPHEADER, ["Authorization: Bearer $token"]);
+    return ["code" => $http_code, "response" => json_decode($response, true)];
+}
 
-// Exécuter la requête
-$response = curl_exec($ch);
-$http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-curl_close($ch);
-
-// Vérifier la réponse
-if ($http_code !== 200) {
+$joueurs = sendCurlRequest($api_url."joueurs/", "GET", $token, null);
+if ($joueurs['code'] !== 200) {
     header("Location: logout.php");
 }
+$joueurs = $joueurs['response']['data'];
+$totalJoueurs = 0;
+$joueursActifs = 0;
+$joueursBlessés = 0;
 
-// Convertir la réponse JSON en tableau PHP
-$stats = json_decode($response, true);
-
-// Petite fonction pour calculer combien de sets chaque équipe a gagnés,
-// sans valider strictement la règle de 25 pts / 2 pts d’écart, juste un >/<.
-function computeSets(array $rencontre): array
-{
-    $setsEquipe = 0;
-    $setsAdverse = 0;
-    for ($i = 1; $i <= 5; $i++) {
-        $eq = (int)($rencontre["Set{$i}_equipe"] ?? 0);
-        $ad = (int)($rencontre["Set{$i}_adverse"] ?? 0);
-        if ($eq === 0 && $ad === 0) {
-            continue; // set non joué
-        }
-        if ($eq > $ad) {
-            $setsEquipe++;
-        } elseif ($ad > $eq) {
-            $setsAdverse++;
-        }
-    }
-    return ['eq' => $setsEquipe, 'ad' => $setsAdverse];
+foreach($joueurs as $joueur) {
+  $totalJoueurs = $totalJoueurs + 1;
+  if ($joueur['Statut'] == "Actif") {
+    $joueursActifs = $joueursActifs +1;
+  } else if ($joueur['Statut'] == "Blessé") {
+    $joueursBlessés = $joueursBlessés+1;
+  }
 }
 
-try {
-    $dsn = "mysql:host=$host;dbname=$database;charset=utf8mb4";
-    $pdo = new PDO($dsn, $username, $password, [ PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION ]);
-
-    // Récup data pour tableau de bord (joueurs)
-    $totalJoueurs    = $pdo->query("SELECT COUNT(*) FROM Joueur")->fetchColumn();
-    $joueursBlessés  = $pdo->query("SELECT COUNT(*) FROM Joueur WHERE Statut = 'Blessé'")->fetchColumn();
-    $joueursActifs   = $pdo->query("SELECT COUNT(*) FROM Joueur WHERE Statut = 'Actif'")->fetchColumn();
-
-    // Prochaine rencontre
-    $prochaineRencontre = $pdo->query("
-        SELECT * 
-        FROM Rencontre
-        WHERE Date_rencontre >= NOW()
-        ORDER BY Date_rencontre ASC 
-        LIMIT 1
-    ")->fetch(PDO::FETCH_ASSOC);
-
-    // Data pour les stats
-    $nbMatchsWin = $stats['data']['nbWins'];
-    $nbMatchsLoose = $stats['data']['nbLooses'];
-
-    // Calcul du "total des rencontres jouées"
-    // On juge "jouée" si l'une des équipes a >= 3 sets gagnés.
-    $rencontresJouees = $stats['data']['nbMatchs'];
-} catch (PDOException $e) {
-    die("Erreur de connexion à la base de données : " . $e->getMessage());
+// Prochaine rencontre
+$rencontres = sendCurlRequest($api_url."matchs/", "GET", $token, null);
+if ($rencontres['code'] !== 200) {
+  header("Location: logout.php");
 }
+$rencontres = $rencontres['response']['data'];
+
+$prochaineRencontre = null;
+
+$now = new DateTime();
+$now->format('Y-m-d H:i:s'); // Même format que NOW()
+
+foreach($rencontres as $rencontre) {
+  $dateRencontre = new DateTime($rencontre['Date_rencontre']);
+  if ($dateRencontre >= $now) {
+    $prochaineRencontre = $rencontre;
+  }
+}
+
+
+$stats = sendCurlRequest($api_url."statistiques/", "GET", $token, null);
+if ($stats['code'] !== 200) {
+  header("Location: logout.php");
+}
+$stats = $stats['response']['data'];
+
+// Data pour les stats
+$nbMatchsWin = $stats['nbWins'];
+$nbMatchsLoose = $stats['nbLooses'];
+$rencontresJouees = $stats['nbMatchs'];
+
 ?>
 <!DOCTYPE html>
 <html lang="fr">
