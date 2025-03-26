@@ -1,26 +1,30 @@
 <?php
 session_start();
-
-// Si pas de session => login
 if (!isset($_SESSION['user'])) {
     header("Location: login.php");
     exit;
 }
-
-if(!isset($_SESSION['token'])){
-  header("Location: logout.php");
-  exit;
+if (!isset($_SESSION['token'])) {
+    header("Location: logout.php");
+    exit;
 }
 
-// Si c'est guest => on redirige vers rencontre.php
+// Si c’est guest => on redirige vers rencontre.php
 if ($_SESSION['user'] === 'guest') {
     header("Location: rencontre.php");
     exit;
 }
 
 $token = $_SESSION['token'];
-$api_url = "https://volleycoachpro.alwaysdata.net/volleyapi/matchs/";
+$api_url_matchs   = "https://volleycoachpro.alwaysdata.net/volleyapi/matchs/";
+$api_url_joueurs  = "https://volleycoachpro.alwaysdata.net/volleyapi/joueurs/";
 
+$message = "";
+$error   = false;
+
+/**
+ * Fonction cURL générique
+ */
 function sendCurlRequest($url, $method, $token, $data = null) {
     $ch = curl_init($url);
     curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
@@ -32,284 +36,246 @@ function sendCurlRequest($url, $method, $token, $data = null) {
     if ($data) {
         curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($data));
     }
-    $response = curl_exec($ch);
-    $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $response    = curl_exec($ch);
+    $http_code   = curl_getinfo($ch, CURLINFO_HTTP_CODE);
     curl_close($ch);
 
-    return ["code" => $http_code, "response" => json_decode($response, true)];
+    return [
+        "code"     => $http_code,
+        "response" => json_decode($response, true)
+    ];
 }
 
-// Informations BDD
-$host     = "mysql-volleycoachpro.alwaysdata.net";
-$username = "403542";
-$password = "Iutinfo!";
-$database = "volleycoachpro_bd";
-
-$message    = "";
-$error      = false;
-
-// Indicateurs pour rouvrir la modale “score + notes”
-$showModal  = false;
-$modalId    = 0;       // IdRencontre où on a eu une erreur
-$postSets   = [];      // Valeurs saisies pour les sets
-$postNotes  = [];      // Valeurs saisies pour les notes (max=5)
-
-/**
- * Valide un match de volley : 4 sets à 25, 5e à 15, 2 pts d’écart, 3 sets gagnants max.
- */
-function validerVolleyScores(array $scores): array
-{
-    $setsEquipe  = 0;
-    $setsAdverse = 0;
-    for ($i = 1; $i <= 5; $i++) {
-        $eq = (int)($scores["set{$i}_equipe"]  ?? 0);
-        $ad = (int)($scores["set{$i}_adverse"] ?? 0);
-
-        // Set non joué => skip
-        if ($eq === 0 && $ad === 0) {
-            continue;
+// ---------------------------------------------------------------------
+// Récupération liste des joueurs Actifs pour l’affectation
+// ---------------------------------------------------------------------
+$joueursActifs = [];
+$repJ = sendCurlRequest($api_url_joueurs, "GET", $token, null);
+if ($repJ['code'] === 200) {
+    $dataJ = $repJ['response']['data'] ?? [];
+    foreach ($dataJ as $j) {
+        if (($j['Statut'] ?? '') === 'Actif') {
+            $joueursActifs[] = $j;
         }
-        // Si déjà 3 sets gagnés => plus de set
-        if (($setsEquipe === 3 || $setsAdverse === 3) && ($eq > 0 || $ad > 0)) {
-            return ['valid' => false, 'message' => "Set $i joué alors qu'une équipe avait déjà 3 sets gagnés."];
+    }
+} else {
+    $message = "Impossible de récupérer les joueurs (code=".$repJ['code'].")";
+    $error   = true;
+}
+
+// ---------------------------------------------------------------------
+// Traitement du formulaire
+// ---------------------------------------------------------------------
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['main_action'])) {
+    $action = $_POST['main_action'];
+
+    // (1) Ajouter une rencontre => POST /matchs/
+    if ($action === 'add_match') {
+        $dr        = $_POST['date_rencontre'] ?? '';
+        $ne        = $_POST['nom_equipe']     ?? '';
+        $l         = $_POST['lieu']           ?? 'Domicile';
+        $roleSlots = $_POST['roleSlots']      ?? [];
+
+        // Vérif que tous les slots sont remplis
+        foreach ($roleSlots as $slot => $idJ) {
+            if (empty($idJ)) {
+                $error   = true;
+                $message = "Tous les rôles doivent être remplis (slot '$slot' vide).";
+                break;
+            }
         }
-        $isTie    = ($i === 5);
-        $minPoints= $isTie ? 15 : 25;
-        if($eq < $minPoints && $ad < $minPoints){
-            return ['valid'=>false,'message'=>"Set $i : aucun n'a atteint $minPoints pts."];
+        if (!$error) {
+            // Construction du body
+            $mapSlots = [
+                "avant_droit"   => "avd",
+                "avant_centre"  => "avc",
+                "avant_gauche"  => "avg",
+                "arriere_droit" => "ard",
+                "arriere_gauche"=> "arg",
+                "libero"        => "lib",
+                "remp1"         => "r1",
+                "remp2"         => "r2",
+                "remp3"         => "r3",
+                "remp4"         => "r4",
+                "remp5"         => "r5",
+                "remp6"         => "r6",
+            ];
+            $postData = [
+                "date"       => $dr,
+                "adversaire" => $ne,
+                "domext"     => $l,
+                // Score initial
+                "s1e" => 0,"s1a" => 0,
+                "s2e" => 0,"s2a" => 0,
+                "s3e" => 0,"s3a" => 0,
+                "s4e" => 0,"s4a" => 0,
+                "s5e" => 0,"s5a" => 0
+            ];
+            // Rôles
+            foreach ($roleSlots as $slotName => $idJoueur) {
+                if (isset($mapSlots[$slotName])) {
+                    $postData[$mapSlots[$slotName]] = (int)$idJoueur;
+                }
+            }
+            // Envoi POST
+            $resAdd = sendCurlRequest($api_url_matchs, "POST", $token, $postData);
+            if ($resAdd['code'] === 201) {
+                $message = "Rencontre créée via l'API avec succès.";
+            } else {
+                $error   = true;
+                $message = "Échec d’ajout (code=".$resAdd['code'].") : "
+                          .($resAdd['response']['status_message'] ?? '??');
+            }
         }
-        if(abs($eq - $ad) < 2){
-            return ['valid'=>false,'message'=>"Set $i : écart < 2 pts."];
-        }
-        if($eq > $ad) {
-            $setsEquipe++;
-        } elseif($ad > $eq) {
-            $setsAdverse++;
+    }
+
+    // (2) Modifier l’équipe => PUT /matchs/{id} en envoyant avd, avc, etc.
+    elseif ($action === 'update_team') {
+        $idR = $_POST['id_rencontre'] ?? null;
+        if (!$idR) {
+            $error   = true;
+            $message = "Erreur: pas d'idRencontre (update_team).";
         } else {
-            return ['valid'=>false,'message'=>"Set $i : égalité impossible"];
-        }
-    }
-    // Besoin de 3 sets gagnés
-    if($setsEquipe < 3 && $setsAdverse < 3){
-        return ['valid'=>false,'message'=>"Match incomplet (pas 3 sets)."];
-    }
-    return ['valid' => true, 'message' => "Ok"];
-}
-
-try {
-    // Connexion PDO
-    $dsn = "mysql:host=$host;dbname=$database;charset=utf8mb4";
-    $pdo = new PDO($dsn, $username, $password, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
-
-    // On récupère la liste des joueurs Actifs pour l’affectation
-    $stmtJ = $pdo->prepare("
-        SELECT IdJoueur, Numéro_de_license, Nom, Prénom
-        FROM Joueur
-        WHERE Statut='Actif'
-        ORDER BY Nom ASC
-    ");
-    $stmtJ->execute();
-    $joueursActifs = $stmtJ->fetchAll(PDO::FETCH_ASSOC);
-
-    // Traitement des formulaires
-    if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['main_action'])) {
-        $action = $_POST['main_action'];
-
-        // -------------------------------------------------
-        // AJOUTER UNE RENCONTRE + EQUIPE
-        // -------------------------------------------------
-        if ($action === 'add_match') {
-            $dr = $_POST['date_rencontre'] ?? '';
-            $ne = $_POST['nom_equipe']     ?? '';
-            $l  = $_POST['lieu']           ?? 'Domicile';
-
-            $roleSlots = $_POST['roleSlots'] ?? [];
-            // Vérif que tous les slots sont remplis
-            foreach ($roleSlots as $slot => $idJ) {
-                if (empty($idJ)) {
-                    $message = "Tous les rôles doivent être remplis (slot '$slot' vide).";
+            $roleSlots = $_POST['roleSlots']??[];
+            foreach ($roleSlots as $slot=>$idJ){
+                if(empty($idJ)){
                     $error   = true;
+                    $message = "Tous les rôles doivent être remplis (slot '$slot' vide).";
                     break;
                 }
             }
             if(!$error){
-                // Insérer la rencontre
-                $ins = $pdo->prepare("
-                  INSERT INTO Rencontre(
-                    Date_rencontre, Nom_équipe, Domicile_ou_exterieur,
-                    Set1_equipe,Set1_adverse, Set2_equipe,Set2_adverse,
-                    Set3_equipe,Set3_adverse, Set4_equipe,Set4_adverse,
-                    Set5_equipe,Set5_adverse
-                  ) VALUES(
-                    :dr, :ne, :l,
-                    0,0,0,0,0,0,0,0,0,0
-                  )
-                ");
-                $ins->execute([':dr'=>$dr, ':ne'=>$ne, ':l'=>$l]);
-                $newId = $pdo->lastInsertId();
-
-                // Insérer Participer
-                foreach($roleSlots as $slotName => $idJoueur){
-                    $isRemp=(strpos($slotName,'remp')===0);
-                    $tituOrRemp=$isRemp?'Remplaçant':'Titulaire';
-                    $pdo->prepare("
-                      INSERT INTO Participer(IdJoueur,IdRencontre,Rôle,Titulaire_ou_remplacant)
-                      VALUES(:idj,:idr,:r,:t)
-                    ")->execute([
-                      ':idj'=>$idJoueur,
-                      ':idr'=>$newId,
-                      ':r'=>$slotName,
-                      ':t'=>$tituOrRemp
-                    ]);
-                }
-                $message = "Rencontre créée avec succès.";
-            }
-        }
-
-        // -------------------------------------------------
-        // MODIFIER L’EQUIPE
-        // -------------------------------------------------
-        elseif($action==='update_team'){
-            $idR=$_POST['id_rencontre']??null;
-            if(!$idR){
-                $message="Erreur: pas d'idRencontre (update_team).";
-                $error=true;
-            } else {
-                $roleSlots=$_POST['roleSlots']??[];
-                foreach($roleSlots as $slot=>$idJ){
-                    if(empty($idJ)){
-                        $message="Tous les rôles doivent être remplis (slot '$slot' vide).";
-                        $error=true;
-                        break;
+                $mapSlots = [
+                    "avant_droit"   => "avd",
+                    "avant_centre"  => "avc",
+                    "avant_gauche"  => "avg",
+                    "arriere_droit" => "ard",
+                    "arriere_gauche"=> "arg",
+                    "libero"        => "lib",
+                    "remp1"         => "r1",
+                    "remp2"         => "r2",
+                    "remp3"         => "r3",
+                    "remp4"         => "r4",
+                    "remp5"         => "r5",
+                    "remp6"         => "r6",
+                ];
+                $body = [];
+                foreach($roleSlots as $slotName=>$idJoueur){
+                    if(isset($mapSlots[$slotName])){
+                        $body[ $mapSlots[$slotName] ] = (int)$idJoueur;
                     }
                 }
-                if(!$error){
-                    // Suppr Participer
-                    $pdo->prepare("DELETE FROM Participer WHERE IdRencontre=:id")
-                        ->execute([':id'=>$idR]);
-                    // Réinsère
-                    foreach($roleSlots as $slotName=>$idJoueur){
-                        $isRemp=(strpos($slotName,'remp')===0);
-                        $tituOrRemp=$isRemp?'Remplaçant':'Titulaire';
-                        $pdo->prepare("
-                          INSERT INTO Participer(IdJoueur,IdRencontre,Rôle,Titulaire_ou_remplacant)
-                          VALUES(:idj,:idr,:r,:t)
-                        ")->execute([
-                          ':idj'=>$idJoueur,':idr'=>$idR,
-                          ':r'=>$slotName,':t'=>$tituOrRemp
-                        ]);
-                    }
-                    $message="Équipe mise à jour avec succès.";
-                }
-            }
-        }
-
-        // -------------------------------------------------
-        // MODIFIER SCORE + NOTES (5 sets, notes max=5)
-        // -------------------------------------------------
-        elseif($action==='update_score_notes'){
-            $idR=$_POST['id_rencontre']??null;
-            if(!$idR){
-                $message="Erreur: pas d'idRencontre (update_score_notes).";
-                $error=true;
-            } else {
-                // Récup sets
-                for($i=1;$i<=5;$i++){
-                    $postSets["set{$i}_equipe"] =(int)($_POST["set{$i}_equipe"]??0);
-                    $postSets["set{$i}_adverse"]=(int)($_POST["set{$i}_adverse"]??0);
-                }
-                // Récup notes => max=5
-                if(isset($_POST['notes']) && is_array($_POST['notes'])){
-                    foreach($_POST['notes'] as $idJ=>$valNote){
-                        $n=(int)$valNote;
-                        if($n<0)$n=0;
-                        if($n>5)$n=5;
-                        $postNotes[$idJ]=$n;
-                    }
-                }
-                // Validation volley
-                $check=validerVolleyScores($postSets);
-                if(!$check['valid']){
-                    $message="Erreur score volley : ".$check['message'];
-                    $error=true;
-                    $showModal=true;
-                    $modalId=(int)$idR;
+                $resUp = sendCurlRequest($api_url_matchs.$idR, "PUT", $token, $body);
+                if($resUp['code']===200){
+                    $message = "Équipe mise à jour avec succès.";
                 } else {
-                    // Update sets
-                    $pdo->prepare("
-                      UPDATE Rencontre
-                      SET
-                        Set1_equipe=:s1e, Set1_adverse=:s1a,
-                        Set2_equipe=:s2e, Set2_adverse=:s2a,
-                        Set3_equipe=:s3e, Set3_adverse=:s3a,
-                        Set4_equipe=:s4e, Set4_adverse=:s4a,
-                        Set5_equipe=:s5e, Set5_adverse=:s5a
-                      WHERE IdRencontre=:id
-                    ")->execute([
-                      ':s1e'=>$postSets['set1_equipe'], ':s1a'=>$postSets['set1_adverse'],
-                      ':s2e'=>$postSets['set2_equipe'], ':s2a'=>$postSets['set2_adverse'],
-                      ':s3e'=>$postSets['set3_equipe'], ':s3a'=>$postSets['set3_adverse'],
-                      ':s4e'=>$postSets['set4_equipe'], ':s4a'=>$postSets['set4_adverse'],
-                      ':s5e'=>$postSets['set5_equipe'], ':s5a'=>$postSets['set5_adverse'],
-                      ':id'=>$idR
-                    ]);
-                    // Update notes
-                    foreach($postNotes as $idJ=>$n){
-                        $pdo->prepare("
-                          UPDATE Participer
-                          SET Note=:n
-                          WHERE IdRencontre=:idr AND IdJoueur=:idj
-                        ")->execute([
-                          ':n'=>$n, ':idr'=>$idR, ':idj'=>$idJ
-                        ]);
-                    }
-                    $message="Score + notes mis à jour avec succès.";
+                    $error   = true;
+                    $message = "Échec update équipe (code=".$resUp['code'].") : "
+                              .($resUp['response']['status_message'] ?? '??');
                 }
             }
         }
+    }
 
-        // -------------------------------------------------
-        // MODIFIER INFOS
-        // -------------------------------------------------
-        elseif($action==='update_info'){
-            $idR=$_POST['id_rencontre']??null;
-            if(!$idR){
-                $message="Erreur: pas d'idRencontre (update_info).";
-                $error=true;
+    // (3) Modifier Score + Notes => PUT /matchs/{id} (s1e..., noteAVG..., etc.)
+    elseif ($action === 'update_score_notes') {
+        $idR = $_POST['id_rencontre'] ?? null;
+        if (!$idR) {
+            $error   = true;
+            $message = "Erreur: pas d'idRencontre (update_score_notes).";
+        } else {
+            // Récup sets
+            $body = [
+                "s1e" => (int)($_POST["set1_equipe"]  ?? 0),
+                "s1a" => (int)($_POST["set1_adverse"] ?? 0),
+                "s2e" => (int)($_POST["set2_equipe"]  ?? 0),
+                "s2a" => (int)($_POST["set2_adverse"] ?? 0),
+                "s3e" => (int)($_POST["set3_equipe"]  ?? 0),
+                "s3a" => (int)($_POST["set3_adverse"] ?? 0),
+                "s4e" => (int)($_POST["set4_equipe"]  ?? 0),
+                "s4a" => (int)($_POST["set4_adverse"] ?? 0),
+                "s5e" => (int)($_POST["set5_equipe"]  ?? 0),
+                "s5a" => (int)($_POST["set5_adverse"] ?? 0),
+            ];
+            // Notes => noteAVG, noteAVC, etc.
+            $notesFields = [
+                "noteAVG","noteAVC","noteAVD","noteARG","noteARD","noteLIB",
+                "noteR1","noteR2","noteR3","noteR4","noteR5","noteR6"
+            ];
+            foreach($notesFields as $f){
+                if(isset($_POST[$f])){
+                    $val = (int)$_POST[$f];
+                    if($val<0) $val=0;
+                    if($val>5) $val=5;
+                    $body[$f] = $val;
+                }
+            }
+            // Envoi PUT
+            $resUp = sendCurlRequest($api_url_matchs.$idR, "PUT", $token, $body);
+            if($resUp['code']===200){
+                $message = "Score + notes modifiés.";
             } else {
-                $dr=$_POST['date_rencontre']??'';
-                $ne=$_POST['nom_equipe']    ??'';
-                $l =$_POST['lieu']          ??'Domicile';
-
-                $pdo->prepare("
-                  UPDATE Rencontre
-                  SET Date_rencontre=:dr, Nom_équipe=:ne, Domicile_ou_exterieur=:l
-                  WHERE IdRencontre=:id
-                ")->execute([
-                  ':dr'=>$dr, ':ne'=>$ne, ':l'=>$l, ':id'=>$idR
-                ]);
-                $message="Infos du match modifiées avec succès.";
+                $error   = true;
+                $message = "Échec update score/notes (code=".$resUp['code'].") : "
+                          .($resUp['response']['status_message'] ?? '??');
             }
         }
     }
-    elseif(isset($_GET['action']) && $_GET['action']==='delete'){
-        $idDel=$_GET['id']??null;
-        if($idDel){
-            $pdo->prepare("DELETE FROM Participer WHERE IdRencontre=:id")->execute([':id'=>$idDel]);
-            $pdo->prepare("DELETE FROM Rencontre   WHERE IdRencontre=:id")->execute([':id'=>$idDel]);
-            $message="Rencontre supprimée.";
+
+    // (4) Modifier Infos => PUT /matchs/{id} ( date, adversaire, domext )
+    elseif ($action === 'update_info') {
+        $idR = $_POST['id_rencontre'] ?? null;
+        if(!$idR){
+            $error   = true;
+            $message = "Erreur: pas d'idRencontre (update_info).";
+        } else {
+            $dr = $_POST['date_rencontre'] ?? '';
+            $ne = $_POST['nom_equipe']     ?? '';
+            $l  = $_POST['lieu']           ?? 'Domicile';
+            $body = [
+                "date"       => $dr,
+                "adversaire" => $ne,
+                "domext"     => $l
+            ];
+            $resUp = sendCurlRequest($api_url_matchs.$idR, "PUT", $token, $body);
+            if($resUp['code']===200){
+                $message = "Infos du match modifiées.";
+            } else {
+                $error   = true;
+                $message = "Échec update infos (code=".$resUp['code'].") : "
+                          .($resUp['response']['status_message'] ?? '??');
+            }
         }
     }
+}
 
-    // Récup listes de rencontres
-    $rencontres = sendCurlRequest($api_url, "GET", $token, null);
-    if ($rencontres['code'] !== 200) {
-        header("Location: logout.php");
+// ---------------------------------------------------------------------
+// Supprimer => DELETE /matchs/{id}
+// ---------------------------------------------------------------------
+if (isset($_GET['action']) && $_GET['action']==='delete') {
+    $idDel = $_GET['id'] ?? null;
+    if($idDel){
+        $resDel = sendCurlRequest($api_url_matchs.$idDel, "DELETE", $token, null);
+        if($resDel['code']===200){
+            $message = "Rencontre d'ID $idDel supprimée";
+        } else {
+            $error   = true;
+            $message = "Échec suppression (code=".$resDel['code'].") : "
+                      .($resDel['response']['status_message'] ?? '??');
+        }
     }
-    $rencontres = $rencontres['response']['data'];
+}
 
-} catch(PDOException $e){
-    die("Erreur BDD: ".$e->getMessage());
+// ---------------------------------------------------------------------
+// Récup liste des rencontres => GET /matchs/
+// ---------------------------------------------------------------------
+$rencontres = [];
+$resMatches = sendCurlRequest($api_url_matchs, "GET", $token, null);
+if ($resMatches['code']===200){
+    $rencontres = $resMatches['response']['data'] ?? [];
+} else {
+    $error   = true;
+    $message = "Impossible de récupérer les rencontres (code=".$resMatches['code'].").";
 }
 ?>
 <!DOCTYPE html>
@@ -340,74 +306,62 @@ try {
 </div>
 
 <?php if($message): ?>
-<p class="message <?= $error ? 'error-message' : 'info-message' ?>">
+<p class="message <?= $error ? 'error-message':'info-message' ?>">
   <?= htmlspecialchars($message) ?>
 </p>
 <?php endif; ?>
 
-<!-- Indicateurs JS -->
-<script>
-var showModal   = <?= $showModal?'true':'false' ?>;
-var modalId     = <?= (int)$modalId ?>;
-// postSets => ex: { "set1_equipe":10, "set1_adverse":25, ... }
-var postSets    = <?= json_encode($postSets) ?>;
-// postNotes => ex: { "1":3, "2":5, ... }
-var postNotes   = <?= json_encode($postNotes) ?>;
-</script>
-
-
 <div class="content-container">
-<h1 class="page-title">Gestion des Rencontres</h1>
+  <h1 class="page-title">Gestion des Rencontres</h1>
 
-<!-- Bouton AJOUT -->
-<div class="search-container">
-  <button class="button-add" onclick="openAddMatchModal()">Ajouter une nouvelle rencontre</button>
-</div>
+  <div class="search-container">
+    <button class="button-add" onclick="openAddMatchModal()">Ajouter une nouvelle rencontre</button>
+  </div>
 
-<!-- Tableau rencontres -->
-<div class="content-box">
-<table class="table table-rencontres">
-  <thead>
-    <tr>
-      <th>Date/Heure</th>
-      <th>Équipe adverse</th>
-      <th>Lieu</th>
-      <th>Actions</th>
-    </tr>
-  </thead>
-  <tbody>
-    <?php foreach($rencontres as $r):
-        $dt = new DateTime($r['Date_rencontre']);
-        $affDate = $dt->format('d/m/Y H:i');
-        $isPast = $dt < new DateTime(); // Vérifie si la date est passée
-    ?>
-    <tr>
-        <td><?= htmlspecialchars($affDate) ?></td>
-        <td><?= htmlspecialchars($r['Nom_équipe']) ?></td>
-        <td><?= htmlspecialchars($r['Domicile_ou_exterieur']) ?></td>
-        <td>
-            <button class="button-edit" onclick="openUpdateChoiceModal(<?= $r['IdRencontre'] ?>)">Modifier</button>
-            <a class="button-delete <?= $isPast ? 'disabled' : '' ?>"
-                href="<?= $isPast ? '#' : '?action=delete&id=' . $r['IdRencontre'] ?>"
-                onclick="<?= $isPast ? 'return false;' : 'return confirm(\'Supprimer ?\');' ?>">
-                Supprimer
+  <div class="content-box">
+    <table class="table table-rencontres">
+      <thead>
+        <tr>
+          <th>Date/Heure</th>
+          <th>Équipe adverse</th>
+          <th>Lieu</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        <?php
+        foreach ($rencontres as $r):
+            $dt = new DateTime($r['Date_rencontre']);
+            $affDate = $dt->format('d/m/Y H:i');
+            $isPast  = ($dt < new DateTime());
+        ?>
+        <tr>
+          <td><?= htmlspecialchars($affDate) ?></td>
+          <td><?= htmlspecialchars($r['Nom_équipe']) ?></td>
+          <td><?= htmlspecialchars($r['Domicile_ou_exterieur']) ?></td>
+          <td>
+            <button class="button-edit" 
+                    onclick="openUpdateChoiceModal(<?= $r['IdRencontre'] ?>)">
+              Modifier
+            </button>
+            <a class="button-delete <?= $isPast?'disabled':'' ?>"
+               href="<?= $isPast?'#':'?action=delete&id='.$r['IdRencontre'] ?>"
+               onclick="<?= $isPast?'return false;':'return confirm(\'Supprimer ?\');' ?>">
+              Supprimer
             </a>
-        </td>
-    </tr>
-    <?php endforeach; ?>
-  </tbody>
-</table>
+          </td>
+        </tr>
+        <?php endforeach;?>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="bottom-button-container">
+    <a href="rencontre.php" class="button-manage">Voir les rencontres</a>
+  </div>
 </div>
 
-<!-- Bouton pour aller à rencontre.php -->
-        <div class="bottom-button-container">
-            <a href="rencontre.php" class="button-manage">Voir les rencontres</a>
-        </div>
-    </div>
-
-<!-- MODALES -->
-
-<!-- Ajout match + équipe -->
+<!-- Modales -->
 <div id="add-match-modal" class="modal">
   <div class="modal-content">
     <h2>Ajouter une nouvelle rencontre</h2>
@@ -438,7 +392,6 @@ var postNotes   = <?= json_encode($postNotes) ?>;
   </div>
 </div>
 
-<!-- Update Choice -->
 <div id="update-choice-modal" class="modal">
   <div class="modal-content">
     <h2>Modifier la rencontre</h2>
@@ -455,7 +408,6 @@ var postNotes   = <?= json_encode($postNotes) ?>;
   </div>
 </div>
 
-<!-- Update Team -->
 <div id="update-team-modal" class="modal">
   <div class="modal-content">
     <h2>Modifier l'équipe</h2>
@@ -471,7 +423,6 @@ var postNotes   = <?= json_encode($postNotes) ?>;
   </div>
 </div>
 
-<!-- Update Score+Notes (5 sets toujours visibles, notes max=5) -->
 <div id="update-score-modal" class="modal">
   <div class="modal-content">
     <h2>Modifier Score + Notes</h2>
@@ -482,33 +433,58 @@ var postNotes   = <?= json_encode($postNotes) ?>;
 
       <table class="table">
         <thead>
-          <tr><th>Set</th><th>Équipe (max25/15)</th><th>Adverse</th></tr>
+          <tr><th>Set</th><th>Équipe</th><th>Adverse</th></tr>
         </thead>
         <tbody>
-        <?php for($i=1;$i<=5;$i++):
-          $maxVal=($i===5)?15:25;
-        ?>
+        <?php for($i=1;$i<=5;$i++): ?>
           <tr>
             <td><?= $i ?></td>
-            <td>
-              <input type="number" name="set<?= $i ?>_equipe"
-                     id="upd_score_set<?= $i ?>_equipe"
-                     min="0" max="<?= $maxVal ?>"
-                     value="0" class=".modal-content-score-notes input[type="number"]">
-            </td>
-            <td>
-              <input type="number" name="set<?= $i ?>_adverse"
-                     id="upd_score_set<?= $i ?>_adverse"
-                     min="0" max="<?= $maxVal ?>"
-                     value="0" class=".modal-content-score-notes input[type="number"]">
-            </td>
+            <td><input type="number" name="set<?= $i ?>_equipe" id="upd_score_set<?= $i ?>_equipe" min="0" max="50" value="0"></td>
+            <td><input type="number" name="set<?= $i ?>_adverse" id="upd_score_set<?= $i ?>_adverse" min="0" max="50" value="0"></td>
           </tr>
         <?php endfor; ?>
         </tbody>
       </table>
 
       <h3>Notes Joueurs (0 à 5)</h3>
-      <div id="score_notes_players" class="note-container"></div>
+      <div style="display: flex; flex-wrap: wrap; gap: 10px;">
+        <label>Avant Gauche (AVG):
+          <input type="number" name="noteAVG" min="0" max="5" value="0">
+        </label>
+        <label>Avant Centre (AVC):
+          <input type="number" name="noteAVC" min="0" max="5" value="0">
+        </label>
+        <label>Avant Droit (AVD):
+          <input type="number" name="noteAVD" min="0" max="5" value="0">
+        </label>
+        <label>Arrière Gauche (ARG):
+          <input type="number" name="noteARG" min="0" max="5" value="0">
+        </label>
+        <label>Arrière Droit (ARD):
+          <input type="number" name="noteARD" min="0" max="5" value="0">
+        </label>
+        <label>Libéro (LIB):
+          <input type="number" name="noteLIB" min="0" max="5" value="0">
+        </label>
+        <label>Remplaçant #1 (R1):
+          <input type="number" name="noteR1" min="0" max="5" value="0">
+        </label>
+        <label>Remplaçant #2 (R2):
+          <input type="number" name="noteR2" min="0" max="5" value="0">
+        </label>
+        <label>Remplaçant #3 (R3):
+          <input type="number" name="noteR3" min="0" max="5" value="0">
+        </label>
+        <label>Remplaçant #4 (R4):
+          <input type="number" name="noteR4" min="0" max="5" value="0">
+        </label>
+        <label>Remplaçant #5 (R5):
+          <input type="number" name="noteR5" min="0" max="5" value="0">
+        </label>
+        <label>Remplaçant #6 (R6):
+          <input type="number" name="noteR6" min="0" max="5" value="0">
+        </label>
+      </div>
 
       <div class="modal-actions">
         <button type="submit">Valider</button>
@@ -518,7 +494,6 @@ var postNotes   = <?= json_encode($postNotes) ?>;
   </div>
 </div>
 
-<!-- Update Info -->
 <div id="update-info-modal" class="modal">
   <div class="modal-content">
     <h2>Modifier les infos</h2>
@@ -549,10 +524,9 @@ var postNotes   = <?= json_encode($postNotes) ?>;
 </div>
 
 <script>
-// Liste joueurs Actifs
 var joueursActifs = <?php echo json_encode($joueursActifs, JSON_HEX_TAG|JSON_HEX_AMP); ?>;
 
-// Rôles (6 fixes + 6 remplaçants)
+/** Rôles fixés */
 let rolesFixed = [
   {slot:'avant_droit',   label:'Avant droit'},
   {slot:'avant_centre',  label:'Avant centre'},
@@ -565,7 +539,6 @@ for(let i=1;i<=6;i++){
   rolesFixed.push({slot:'remp'+i, label:'Remplaçant #'+i});
 }
 
-// *** FONCTIONS AJOUT MATCH ***
 function openAddMatchModal(){
   document.getElementById('add-match-modal').style.display='flex';
   fillAllSlots('add_match_slotsContainer', {});
@@ -588,7 +561,6 @@ function fillAllSlots(containerId, selected){
 
     let sel=document.createElement('select');
     sel.name=`roleSlots[${r.slot}]`;
-    sel.id=`slot_${r.slot}`;
 
     let optNone=document.createElement('option');
     optNone.value='';
@@ -608,24 +580,22 @@ function fillAllSlots(containerId, selected){
     });
 
     sel.addEventListener('change',()=>{
-      onChangeSlot(containerId,selected,r.slot,sel);
+      let oldVal=selected[r.slot]||'';
+      let newVal=sel.value||'';
+      if(oldVal!==newVal){
+        if(newVal){
+          selected[r.slot]=newVal;
+        } else {
+          delete selected[r.slot];
+        }
+        fillAllSlots(containerId, selected);
+      }
     });
 
     row.appendChild(lab);
     row.appendChild(sel);
     container.appendChild(row);
   });
-}
-function onChangeSlot(containerId, selected, slotName, selectEl){
-  let oldVal=selected[slotName]||'';
-  let newVal=selectEl.value||'';
-  if(oldVal===newVal)return;
-  if(newVal){
-    selected[slotName]=newVal;
-  } else {
-    delete selected[slotName];
-  }
-  fillAllSlots(containerId, selected);
 }
 function checkNoEmpty(containerId){
   let sel=document.querySelectorAll('#'+containerId+' select');
@@ -638,7 +608,6 @@ function checkNoEmpty(containerId){
   return true;
 }
 
-// *** FONCTIONS UPDATE CHOICE ***
 function openUpdateChoiceModal(idR){
   document.getElementById('update-choice-modal').style.display='flex';
   document.getElementById('updChoice_id').value=idR;
@@ -647,135 +616,44 @@ function closeUpdateChoiceModal(){
   document.getElementById('update-choice-modal').style.display='none';
 }
 
-// *** updateTeam ***
 function updateTeam(idR){
   closeUpdateChoiceModal();
   document.getElementById('update-team-modal').style.display='flex';
   document.getElementById('upd_team_id_rencontre').value=idR;
-
-  fetch('participants_rencontre.php?id='+idR)
-    .then(r=>r.json())
-    .then(selected=>{
-      fillAllSlots('upd_team_slotsContainer', selected);
-    })
-    .catch(err=>console.error(err));
+  // Pas d’API GET participants => on laisse l’utilisateur ressaisir l’équipe
+  fillAllSlots('upd_team_slotsContainer', {});
 }
 function closeUpdateTeamModal(){
   document.getElementById('update-team-modal').style.display='none';
 }
 
-// *** updateScoreNotes (modale “score+notes”) ***
 function updateScoreNotes(idR){
   closeUpdateChoiceModal();
   document.getElementById('update-score-modal').style.display='flex';
   document.getElementById('upd_score_id_rencontre').value=idR;
-
-  // Réinitialiser sets
+  // Remettre sets à 0
   for(let i=1;i<=5;i++){
-    let max=(i===5)?15:25;
-    document.getElementById('upd_score_set'+i+'_equipe').max=max;
-    document.getElementById('upd_score_set'+i+'_equipe').value=0;
-    document.getElementById('upd_score_set'+i+'_adverse').max=max;
-    document.getElementById('upd_score_set'+i+'_adverse').value=0;
+    document.getElementById(`upd_score_set${i}_equipe`).value=0;
+    document.getElementById(`upd_score_set${i}_adverse`).value=0;
   }
-
-  // Si showModal & modalId==idR => on a postSets => on les restaure
-  if(showModal==='true' && parseInt(modalId)===parseInt(idR) && Object.keys(postSets).length>0){
-    for(let i=1;i<=5;i++){
-      let eq=postSets[`set${i}_equipe`]||0;
-      let ad=postSets[`set${i}_adverse`]||0;
-      document.getElementById(`upd_score_set${i}_equipe`).value=eq;
-      document.getElementById(`upd_score_set${i}_adverse`).value=ad;
-    }
-  } else {
-    // fetch sets
-    fetch('get_sets.php?id='+idR)
-      .then(r=>r.json())
-      .then(d=>{
-        for(let i=1;i<=5;i++){
-          let eq=d[`set${i}_equipe`]||0;
-          let ad=d[`set${i}_adverse`]||0;
-          document.getElementById(`upd_score_set${i}_equipe`).value=eq;
-          document.getElementById(`upd_score_set${i}_adverse`).value=ad;
-        }
-      })
-      .catch(err=>console.error(err));
-  }
-
-  // Charger notes
-  let cont=document.getElementById('score_notes_players');
-  cont.innerHTML='';
-  if(showModal==='true' && parseInt(modalId)===parseInt(idR) && Object.keys(postNotes).length>0){
-    // Restaure
-    for(let idJ in postNotes){
-      let valN=postNotes[idJ];
-      if(valN>5)valN=5;
-      cont.innerHTML+=`
-        <div class="margin-bottom-5">
-            <label>Joueur #${idJ}</label>
-            <input type="number" name="notes[${idJ}]"
-                value="${valN}" min="0" max="5"
-            class="input-small">
-        </div>
-      `;
-    }
-  } else {
-    fetch('participants_notes.php?id='+idR)
-      .then(r=>r.json())
-      .then(list=>{
-        if(!list||list.length===0){
-          cont.innerHTML='<p>Aucun joueur</p>';
-          return;
-        }
-        list.forEach(p=>{
-          let n=(p.Note!==null?p.Note:0);
-          if(n>5)n=5;
-          cont.innerHTML+=`
-            <div style="margin-bottom:5px;">
-              <label>${p.Nom} ${p.Prénom}</label>
-              <input type="number" name="notes[${p.IdJoueur}]"
-                     value="${n}" min="0" max="5"
-                     style="width:50px;">
-            </div>
-          `;
-        });
-      })
-      .catch(err=>console.error(err));
-  }
-
-  // Réinitialiser l’erreur
   document.getElementById('scoreModalError').textContent='';
 }
 function closeUpdateScoreModal(){
   document.getElementById('update-score-modal').style.display='none';
 }
 
-// *** updateInfo
 function updateInfo(idR){
   closeUpdateChoiceModal();
   document.getElementById('update-info-modal').style.display='flex';
   document.getElementById('upd_info_id_rencontre').value=idR;
-
-  fetch('info_rencontre.php?id='+idR)
-    .then(r=>r.json())
-    .then(d=>{
-      document.getElementById('upd_info_date').value = d.DateRencontre || '';
-      document.getElementById('upd_info_nom').value  = d.NomEquipe     || '';
-      document.getElementById('upd_info_lieu').value = d.Lieu          || 'Domicile';
-    })
-    .catch(err=>console.error(err));
+  // Pas de fetch => on laisse l’utilisateur ressaisir
+  document.getElementById('upd_info_date').value='';
+  document.getElementById('upd_info_nom').value='';
+  document.getElementById('upd_info_lieu').value='Domicile';
 }
 function closeUpdateInfoModal(){
   document.getElementById('update-info-modal').style.display='none';
 }
-
-// *** Au chargement, si erreur => rouvrir la modale score+notes
-document.addEventListener('DOMContentLoaded', ()=>{
-  if(<?= $error?'true':'false' ?> && <?= $showModal?'true':'false' ?> && <?= $modalId>0?'true':'false' ?>){
-    document.getElementById('scoreModalError').textContent=<?= json_encode($message) ?>;
-    updateScoreNotes(<?= $modalId ?>);
-  }
-});
 </script>
 </body>
 </html>

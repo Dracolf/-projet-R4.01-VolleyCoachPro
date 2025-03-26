@@ -1,46 +1,68 @@
 <?php
+session_start();
 header('Content-Type: application/json');
 
-$host     = "mysql-volleycoachpro.alwaysdata.net";
-$username = "403542";
-$password = "Iutinfo!";
-$database = "volleycoachpro_bd";
-
-try{
-    $pdo=new PDO("mysql:host=$host;dbname=$database;charset=utf8mb4",
-                 $username,$password,[PDO::ATTR_ERRMODE=>PDO::ERRMODE_EXCEPTION]);
-} catch(PDOException $e){
-    echo json_encode([]);
+if(!isset($_SESSION['user'])){
+    http_response_code(403);
+    echo json_encode(["error"=>"Accès refusé"]);
     exit;
 }
+if(!isset($_SESSION['token'])){
+    http_response_code(403);
+    echo json_encode(["error"=>"Token manquant"]);
+    exit;
+}
+$token = $_SESSION['token'];
 
-$idRencontre=isset($_GET['id'])?(int)$_GET['id']:0;
+$idRencontre = isset($_GET['id'])?(int)$_GET['id']:0;
 if($idRencontre<=0){
-    echo json_encode([]);
+    http_response_code(400);
+    echo json_encode(["error"=>"ID invalide"]);
     exit;
 }
 
-$stmt=$pdo->prepare("SELECT * FROM Rencontre WHERE IdRencontre=:id");
-$stmt->execute([':id'=>$idRencontre]);
-$row=$stmt->fetch(PDO::FETCH_ASSOC);
+$api_url = "https://volleycoachpro.alwaysdata.net/volleyapi/matchs/$idRencontre";
 
-if(!$row){
-    echo json_encode([]);
-    exit;
+function sendCurlRequest($url, $method, $token){
+    $ch = curl_init($url);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER,true);
+    curl_setopt($ch, CURLOPT_CUSTOMREQUEST,$method);
+    curl_setopt($ch, CURLOPT_HTTPHEADER, [
+        "Authorization: Bearer $token",
+        "Content-Type: application/json"
+    ]);
+    $res  = curl_exec($ch);
+    $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+    return ["code"=>$code, "response"=>json_decode($res,true)];
 }
 
-// On construit un tableau associatif
-$result=[
-  'set1_equipe'=>$row['Set1_equipe'],
-  'set1_adverse'=>$row['Set1_adverse'],
-  'set2_equipe'=>$row['Set2_equipe'],
-  'set2_adverse'=>$row['Set2_adverse'],
-  'set3_equipe'=>$row['Set3_equipe'],
-  'set3_adverse'=>$row['Set3_adverse'],
-  'set4_equipe'=>$row['Set4_equipe'],
-  'set4_adverse'=>$row['Set4_adverse'],
-  'set5_equipe'=>$row['Set5_equipe'],
-  'set5_adverse'=>$row['Set5_adverse']
-];
-
-echo json_encode($result);
+$res = sendCurlRequest($api_url, "GET", $token);
+if($res['code']===200){
+    // On suppose la réponse = { "status_code":200, "data": { ... } }
+    $data = $res['response']['data'] ?? null;
+    if(!$data){
+        http_response_code(404);
+        echo json_encode(["error"=>"Match introuvable"]);
+        exit;
+    }
+    $out = [
+      "set1_equipe" => $data['Set1_equipe'],
+      "set1_adverse"=> $data['Set1_adverse'],
+      "set2_equipe" => $data['Set2_equipe'],
+      "set2_adverse"=> $data['Set2_adverse'],
+      "set3_equipe" => $data['Set3_equipe'],
+      "set3_adverse"=> $data['Set3_adverse'],
+      "set4_equipe" => $data['Set4_equipe'],
+      "set4_adverse"=> $data['Set4_adverse'],
+      "set5_equipe" => $data['Set5_equipe'],
+      "set5_adverse"=> $data['Set5_adverse'],
+    ];
+    echo json_encode($out);
+} else {
+    http_response_code($res['code']);
+    echo json_encode([
+      "error"=>"Impossible de récupérer ce match",
+      "api_response"=>$res['response']
+    ]);
+}

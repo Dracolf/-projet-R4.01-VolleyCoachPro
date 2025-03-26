@@ -1,35 +1,49 @@
 <?php
+session_start();
 header('Content-Type: application/json');
 
-$host     = "mysql-volleycoachpro.alwaysdata.net";
-$username = "403542";
-$password = "Iutinfo!";
-$database = "volleycoachpro_bd";
-
-try{
-    $pdo=new PDO("mysql:host=$host;dbname=$database;charset=utf8mb4",
-                 $username,$password,[PDO::ATTR_ERRMODE=>PDO::ERRMODE_EXCEPTION]);
-} catch(PDOException $e){
-    echo json_encode([]);
+if(!isset($_SESSION['user'])){
+    http_response_code(403);
+    echo json_encode(["error"=>"Accès refusé"]);
     exit;
 }
+if(!isset($_SESSION['token'])){
+    http_response_code(403);
+    echo json_encode(["error"=>"Token manquant"]);
+    exit;
+}
+$token = $_SESSION['token'];
 
 $idRencontre = isset($_GET['id'])?(int)$_GET['id']:0;
 if($idRencontre<=0){
-    echo json_encode([]);
+    http_response_code(400);
+    echo json_encode(["error"=>"ID invalide"]);
     exit;
 }
 
-// On joint Participer + Joueur pour avoir Nom, Prénom, Note
-$sql="
-  SELECT p.IdJoueur, j.Nom, j.Prénom, p.Note
-  FROM Participer p
-  JOIN Joueur j ON p.IdJoueur=j.IdJoueur
-  WHERE p.IdRencontre=:idr
-  ORDER BY j.Nom
-";
-$stmt=$pdo->prepare($sql);
-$stmt->execute([':idr'=>$idRencontre]);
-$data=$stmt->fetchAll(PDO::FETCH_ASSOC);
+$api_url = "https://volleycoachpro.alwaysdata.net/volleyapi/matchs/$idRencontre/participantsNotes";
 
-echo json_encode($data);
+function sendCurlRequest($url, $method, $token){
+    $ch = curl_init($url);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER,true);
+    curl_setopt($ch, CURLOPT_CUSTOMREQUEST,$method);
+    curl_setopt($ch, CURLOPT_HTTPHEADER, [
+        "Authorization: Bearer $token",
+        "Content-Type: application/json"
+    ]);
+    $resp = curl_exec($ch);
+    $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+    return ["code"=>$code, "response"=>json_decode($resp,true)];
+}
+
+$res = sendCurlRequest($api_url, "GET", $token);
+if($res['code']===200){
+    echo json_encode($res['response']);
+} else {
+    http_response_code($res['code']);
+    echo json_encode([
+      "error"=>"Impossible de récupérer participants + notes",
+      "api_response"=>$res['response']
+    ]);
+}
