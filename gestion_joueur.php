@@ -87,7 +87,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     }
 
     // Vérification avant d’accéder à $result
-    if ($result !== null && $result["code"] === 200) {
+    if ($result !== null && ($result["code"] === 200 || $result["code"] === 201)) {
         $message = match ($action) {
             'add' => "Nouveau joueur ajouté avec succès.",
             'update' => "Le joueur a été mis à jour avec succès.",
