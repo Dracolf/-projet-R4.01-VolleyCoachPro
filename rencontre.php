@@ -1,14 +1,14 @@
 <?php
 session_start();
 
-// Vérifier la session
-if(!isset($_SESSION['user'])){
+// Vérifier session
+if (!isset($_SESSION['user'])) {
     header("Location: login.php");
     exit;
 }
-if(!isset($_SESSION['token'])){
-  header("Location: logout.php");
-  exit;
+if (!isset($_SESSION['token'])) {
+    header("Location: logout.php");
+    exit;
 }
 
 $token = $_SESSION['token'];
@@ -17,13 +17,16 @@ $api_url = "https://volleycoachpro.alwaysdata.net/volleyapi/matchs/";
 $message = "";
 $error   = false;
 
-function sendCurlRequest($url, $method, $token, $data=null){
+/**
+ * cURL générique
+ */
+function sendCurlRequest($url, $method, $token, $data=null) {
     $ch = curl_init($url);
     curl_setopt($ch, CURLOPT_RETURNTRANSFER,true);
     curl_setopt($ch, CURLOPT_CUSTOMREQUEST,$method);
     curl_setopt($ch, CURLOPT_HTTPHEADER, [
-      "Authorization: Bearer $token",
-      "Content-Type: application/json"
+        "Authorization: Bearer $token",
+        "Content-Type: application/json"
     ]);
     if($data){
         curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($data));
@@ -34,18 +37,19 @@ function sendCurlRequest($url, $method, $token, $data=null){
 
     return [
       "code"=>$code,
-      "response"=>json_decode($resp,true)
+      "response"=>json_decode($resp, true)
     ];
 }
 
-// Form "score + notes"
-if($_SERVER['REQUEST_METHOD']==='POST' && isset($_POST['action']) && $_POST['action']==='update_score_notes_front'){
-    $idR = $_POST['id_rencontre']??null;
-    if(!$idR){
+// (1) Traitement du POST => "update_score_notes_front"
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'update_score_notes_front') {
+    $idR = $_POST['id_rencontre'] ?? null;
+    if (!$idR) {
         $error   = true;
         $message = "ID rencontre manquant.";
     } else {
-        // Build body
+        // On construit le JSON pour PUT
+        // On suppose que l’API attend s1e, s1a, ... s5e, s5a, + "notes": { IdJoueur: note }
         $body = [
           "s1e" => (int)($_POST['set1_equipe']  ??0),
           "s1a" => (int)($_POST['set1_adverse'] ??0),
@@ -57,41 +61,41 @@ if($_SERVER['REQUEST_METHOD']==='POST' && isset($_POST['action']) && $_POST['act
           "s4a" => (int)($_POST['set4_adverse'] ??0),
           "s5e" => (int)($_POST['set5_equipe']  ??0),
           "s5a" => (int)($_POST['set5_adverse'] ??0),
+          "notes" => []
         ];
-        // Notes (AVG..R6)
-        $noteFields = [
-            "noteAVG","noteAVC","noteAVD","noteARG","noteARD","noteLIB",
-            "noteR1","noteR2","noteR3","noteR4","noteR5","noteR6"
-        ];
-        foreach($noteFields as $f){
-            if(isset($_POST[$f])){
-                $val=(int)$_POST[$f];
-                if($val<0)$val=0;
-                if($val>5)$val=5;
-                $body[$f]=$val;
+
+        // notes => notes[idJoueur]
+        if (isset($_POST['notes']) && is_array($_POST['notes'])) {
+            foreach($_POST['notes'] as $idJoueur => $valNote) {
+                $n = (int)$valNote;
+                if($n<1) $n=1;  // min = 1
+                if($n>5) $n=5;  // max = 5
+                $body["notes"][$idJoueur] = $n;
             }
         }
 
-        // PUT
+        // PUT /matchs/{idR}
         $resUp = sendCurlRequest($api_url.$idR, "PUT", $token, $body);
         if($resUp['code']===200){
-            $message="Score + notes mis à jour.";
+            $message = "Score + notes mis à jour (API).";
         } else {
             $error   = true;
-            $message="Échec update (code=".$resUp['code']."): ".($resUp['response']['status_message']??"??");
+            $message = "Échec update (code=".$resUp['code']."): "
+                     . ($resUp['response']['status_message'] ?? "??");
         }
     }
 }
 
-// Récup liste => GET /matchs/
-$rencontres=[];
-$res = sendCurlRequest($api_url, "GET", $token);
-if($res['code']===200){
+// (2) Récup liste rencontres => GET /matchs/
+$rencontres = [];
+$res = sendCurlRequest($api_url, "GET", $token, null);
+if ($res['code']===200) {
     $rencontres = $res['response']['data'] ?? [];
 } else {
     $error   = true;
-    $message = "Impossible de récupérer la liste des rencontres (code=".$res['code'].").";
+    $message = "Impossible de récupérer les rencontres (code=".$res['code'].")";
 }
+
 ?>
 <!DOCTYPE html>
 <html lang="fr">
@@ -99,6 +103,29 @@ if($res['code']===200){
   <meta charset="UTF-8">
   <title>Rencontres</title>
   <link rel="stylesheet" href="styles.css">
+
+  <style>
+    /* conteneur flex multi-ligne pour les joueurs */
+    .players-grid {
+      display: flex;
+      flex-wrap: wrap;  /* autorise retour à la ligne */
+      gap: 15px 20px;
+      margin-top: 15px;
+    }
+    .player-item {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    .player-item label {
+      font-weight: bold;
+      margin-bottom: 5px;
+    }
+    .player-item input[type="number"] {
+      width: 50px;
+      text-align: center;
+    }
+  </style>
 </head>
 <body>
 
@@ -128,11 +155,6 @@ if($res['code']===200){
 <div class="content-container">
   <h1 class="page-title">Rencontres</h1>
 
-  <!-- Bouton pour aller a gestion_rencontre.php -->
-  <div class="bottom-button-container" style="margin-bottom:20px;">
-    <a href="gestion_rencontre.php" class="button-manage">Gérer les rencontres</a>
-  </div>
-
   <div class="content-box">
     <table class="table table-rencontres">
       <thead>
@@ -146,24 +168,26 @@ if($res['code']===200){
         </tr>
       </thead>
       <tbody>
-        <?php
-        $now=new DateTime();
-        foreach($rencontres as $r):
-          $dt=new DateTime($r['Date_rencontre']);
-          $dateAff=$dt->format('d/m/Y');
-          $timeAff=$dt->format('H\hi');
-          // calcul setsEq:setsAd
-          $setsEq=0; 
-          $setsAd=0;
-          for($i=1;$i<=5;$i++){
-            $se=$r["Set{$i}_equipe"];
-            $sa=$r["Set{$i}_adverse"];
-            if($se>$sa) $setsEq++;
-            elseif($sa>$se) $setsAd++;
-          }
-          $scoreTxt=($setsEq===0 && $setsAd===0)? '—' : ($setsEq." : ".$setsAd);
-          $past=($dt<=$now);
-        ?>
+      <?php
+      $now = new DateTime();
+      foreach($rencontres as $r):
+        $dt = new DateTime($r['Date_rencontre']);
+        $dateAff = $dt->format('d/m/Y');
+        $timeAff = $dt->format('H\hi');
+
+        // calcul setsEq:setsAd
+        $setsEq=0; 
+        $setsAd=0;
+        for($i=1;$i<=5;$i++){
+          $se = $r["Set{$i}_equipe"];
+          $sa = $r["Set{$i}_adverse"];
+          if($se>$sa) $setsEq++;
+          elseif($sa>$se) $setsAd++;
+        }
+        $scoreTxt=($setsEq===0 && $setsAd===0)? '—' : ($setsEq." : ".$setsAd);
+
+        $past=($dt <= $now);
+      ?>
         <tr>
           <td><?= htmlspecialchars($dateAff) ?></td>
           <td><?= htmlspecialchars($timeAff) ?></td>
@@ -172,30 +196,45 @@ if($res['code']===200){
           <td><?= htmlspecialchars($scoreTxt) ?></td>
           <td>
             <?php if($past): ?>
-              <button class="button-add-score" onclick="openScoreNotesModal(<?= $r['IdRencontre'] ?>)">Accès au Score et aux Notes</button>
+              <button class="button-add-score"
+                      onclick="openScoreNotesModal(<?= $r['IdRencontre'] ?>)">
+                Accès au Score et aux Notes
+              </button>
             <?php else: ?>
               <span class="button-disabled">Match à venir</span>
             <?php endif; ?>
           </td>
         </tr>
-        <?php endforeach;?>
+      <?php endforeach;?>
       </tbody>
     </table>
   </div>
+
+  <!-- Bouton pour aller a gestion_rencontre.php -->
+  <div class="bottom-button-container" style="margin-bottom: 20px;">
+    <a href="gestion_rencontre.php" class="button-manage">Gérer les rencontres</a>
+  </div>
+
 </div>
 
-<!-- Modale Score + Notes -->
+<!-- MODALE SCORE + NOTES -->
 <div id="score-notes-modal" class="modal">
   <div class="modal-content modal-content-score-notes">
     <h2>Modifier Score + Notes</h2>
     <p id="modalError" class="error-message"></p>
+
     <form method="POST">
       <input type="hidden" name="action" value="update_score_notes_front">
       <input type="hidden" name="id_rencontre" id="sn_id_rencontre">
 
+      <!-- 5 sets -->
       <table class="table">
         <thead>
-          <tr><th>SET</th><th>ÉQUIPE</th><th>ADVERSE</th></tr>
+          <tr>
+            <th>SET</th>
+            <th>ÉQUIPE</th>
+            <th>ADVERSE</th>
+          </tr>
         </thead>
         <tbody>
           <?php for($i=1;$i<=5;$i++): ?>
@@ -208,49 +247,12 @@ if($res['code']===200){
         </tbody>
       </table>
 
-      <h3>Notes Joueurs (0 à 5)</h3>
-      <div style="display: flex; flex-wrap: wrap; gap: 10px;">
-        <label>Avant Gauche (AVG):
-          <input type="number" name="noteAVG" min="0" max="5" value="0">
-        </label>
-        <label>Avant Centre (AVC):
-          <input type="number" name="noteAVC" min="0" max="5" value="0">
-        </label>
-        <label>Avant Droit (AVD):
-          <input type="number" name="noteAVD" min="0" max="5" value="0">
-        </label>
-        <label>Arrière Gauche (ARG):
-          <input type="number" name="noteARG" min="0" max="5" value="0">
-        </label>
-        <label>Arrière Droit (ARD):
-          <input type="number" name="noteARD" min="0" max="5" value="0">
-        </label>
-        <label>Libéro (LIB):
-          <input type="number" name="noteLIB" min="0" max="5" value="0">
-        </label>
-        <label>Rempl. #1 (R1):
-          <input type="number" name="noteR1" min="0" max="5" value="0">
-        </label>
-        <label>Rempl. #2 (R2):
-          <input type="number" name="noteR2" min="0" max="5" value="0">
-        </label>
-        <label>Rempl. #3 (R3):
-          <input type="number" name="noteR3" min="0" max="5" value="0">
-        </label>
-        <label>Rempl. #4 (R4):
-          <input type="number" name="noteR4" min="0" max="5" value="0">
-        </label>
-        <label>Rempl. #5 (R5):
-          <input type="number" name="noteR5" min="0" max="5" value="0">
-        </label>
-        <label>Rempl. #6 (R6):
-          <input type="number" name="noteR6" min="0" max="5" value="0">
-        </label>
-      </div>
+      <h3 style="margin-top: 15px;">Notes Joueurs (1 à 5)</h3>
+      <div class="players-grid" id="playersNotesGrid"></div>
 
-      <div class="modal-actions">
-        <button type="submit">Valider</button>
-        <button type="button" onclick="closeScoreNotesModal()">Annuler</button>
+      <div class="modal-actions" style="margin-top: 20px;">
+        <button type="submit" class="btn btn-primary">Valider</button>
+        <button type="button" class="btn btn-secondary" onclick="closeScoreNotesModal()">Annuler</button>
       </div>
     </form>
   </div>
@@ -258,14 +260,69 @@ if($res['code']===200){
 
 <script>
 function openScoreNotesModal(idR){
+  // ouvre la modale
   document.getElementById('score-notes-modal').style.display='flex';
-  document.getElementById('sn_id_rencontre').value=idR;
+  document.getElementById('sn_id_rencontre').value = idR;
 
-  // Pas de route GET sets => on laisse tout à 0
+  // 1) Récup sets => get_sets.php
+  for(let i=1;i<=5;i++){
+    document.getElementById(`sn_set${i}_equipe`).value=0;
+    document.getElementById(`sn_set${i}_adverse`).value=0;
+  }
+  fetch('get_sets.php?id='+idR)
+    .then(r=>r.json())
+    .then(data=>{
+      if(data.error){
+        console.error(data.error);
+      } else {
+        for(let i=1;i<=5;i++){
+          document.getElementById(`sn_set${i}_equipe`).value = data[`set${i}_equipe`]||0;
+          document.getElementById(`sn_set${i}_adverse`).value= data[`set${i}_adverse`]||0;
+        }
+      }
+    })
+    .catch(err=>console.error(err));
+
+  // 2) Récup joueurs + notes => participants_notes.php
+  // => renvoie [ {IdJoueur, Nom, Prénom, Note}, ... ] (après avoir fait 2 requêtes : /matchs/equipe + /joueurs/id)
+  const grid = document.getElementById('playersNotesGrid');
+  grid.innerHTML = ""; // reset
+
+  fetch('participants_notes.php?id='+idR)
+    .then(r=>r.json())
+    .then(list=>{
+      if(list.error){
+        console.error(list.error);
+        return;
+      }
+      // On crée un bloc par joueur
+      list.forEach(player=>{
+        // ex: player = { "IdJoueur":12, "Nom":"Cobain", "Prénom":"Kurt", "Note":5 }
+        let item = document.createElement('div');
+        item.className = "player-item";
+
+        let lab = document.createElement('label');
+        lab.textContent = player.Nom + " " + player.Prénom;
+
+        let inp = document.createElement('input');
+        inp.type = "number";
+        inp.name = `notes[${player.IdJoueur}]`; // ex: notes[12]
+        inp.min  = "1";
+        inp.max  = "5";
+        inp.value= (player.Note!==null) ? player.Note : 1;
+
+        item.appendChild(lab);
+        item.appendChild(inp);
+        grid.appendChild(item);
+      });
+    })
+    .catch(err=>console.error(err));
 }
+
 function closeScoreNotesModal(){
   document.getElementById('score-notes-modal').style.display='none';
 }
 </script>
+
 </body>
 </html>
