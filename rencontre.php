@@ -1,7 +1,7 @@
 <?php
 session_start();
 
-// Vérifier la session
+// Vérifier session
 if (!isset($_SESSION['user'])) {
     header("Location: login.php");
     exit;
@@ -29,6 +29,7 @@ function sendCurlRequest($url, $method, $token, $data = null) {
         "Content-Type: application/json"
     ]);
     if ($data) {
+        // Envoi du body en JSON
         curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($data));
     }
     $response  = curl_exec($ch);
@@ -42,9 +43,8 @@ function sendCurlRequest($url, $method, $token, $data = null) {
 }
 
 /**
- * (1) Traitement POST => update_score_notes_front
- * On construit le body pour l'API : s1e, s1a,... s5e, s5a
- * + noteAVG, noteAVC, etc.
+ * 1) Traitement du POST => "update_score_notes_front"
+ *    On envoie s1e, s1a,... s5e, s5a + "notes": {IdJoueur => note}
  */
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'update_score_notes_front') {
     $idR = $_POST['id_rencontre'] ?? null;
@@ -54,37 +54,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     } else {
         // Construction du body JSON
         $body = [
-            // 5 sets
-            "s1e" => (int)($_POST["set1_equipe"]  ??0),
-            "s1a" => (int)($_POST["set1_adverse"] ??0),
-            "s2e" => (int)($_POST["set2_equipe"]  ??0),
-            "s2a" => (int)($_POST["set2_adverse"] ??0),
-            "s3e" => (int)($_POST["set3_equipe"]  ??0),
-            "s3a" => (int)($_POST["set3_adverse"] ??0),
-            "s4e" => (int)($_POST["set4_equipe"]  ??0),
-            "s4a" => (int)($_POST["set4_adverse"] ??0),
-            "s5e" => (int)($_POST["set5_equipe"]  ??0),
-            "s5a" => (int)($_POST["set5_adverse"] ??0),
-
-            // 12 champs "noteXXX"
-            "noteAVG" => (int)($_POST["noteAVG"] ?? 0),
-            "noteAVC" => (int)($_POST["noteAVC"] ?? 0),
-            "noteAVD" => (int)($_POST["noteAVD"] ?? 0),
-            "noteARG" => (int)($_POST["noteARG"] ?? 0),
-            "noteARD" => (int)($_POST["noteARD"] ?? 0),
-            "noteLIB" => (int)($_POST["noteLIB"] ?? 0),
-
-            "noteR1"  => (int)($_POST["noteR1"]  ?? 0),
-            "noteR2"  => (int)($_POST["noteR2"]  ?? 0),
-            "noteR3"  => (int)($_POST["noteR3"]  ?? 0),
-            "noteR4"  => (int)($_POST["noteR4"]  ?? 0),
-            "noteR5"  => (int)($_POST["noteR5"]  ?? 0),
-            "noteR6"  => (int)($_POST["noteR6"]  ?? 0),
+          "s1e" => (int)($_POST['set1_equipe']  ?? 0),
+          "s1a" => (int)($_POST['set1_adverse'] ?? 0),
+          "s2e" => (int)($_POST['set2_equipe']  ?? 0),
+          "s2a" => (int)($_POST['set2_adverse'] ?? 0),
+          "s3e" => (int)($_POST['set3_equipe']  ?? 0),
+          "s3a" => (int)($_POST['set3_adverse'] ?? 0),
+          "s4e" => (int)($_POST['set4_equipe']  ?? 0),
+          "s4a" => (int)($_POST['set4_adverse'] ?? 0),
+          "s5e" => (int)($_POST['set5_equipe']  ?? 0),
+          "s5a" => (int)($_POST['set5_adverse'] ?? 0),
+          "notes" => []
         ];
+
+        // notes => notes[idJoueur]
+        if (isset($_POST['notes']) && is_array($_POST['notes'])) {
+            foreach ($_POST['notes'] as $idJoueur => $valNote) {
+                $n = (int)$valNote;
+                if ($n < 1) $n = 1;  // note mini
+                if ($n > 5) $n = 5;  // note maxi
+                $body["notes"][$idJoueur] = $n;
+            }
+        }
 
         // PUT /matchs/{idR}
         $resUp = sendCurlRequest($api_url.$idR, "PUT", $token, $body);
-        if ($resUp['code']===200) {
+        if ($resUp['code'] === 200) {
             $message = "Score + notes mis à jour (API).";
         } else {
             $error   = true;
@@ -95,11 +90,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
 }
 
 /**
- * (2) Récup liste rencontres => GET /matchs/
+ * 2) Récup liste des rencontres => GET /matchs/
  */
 $rencontres = [];
 $res = sendCurlRequest($api_url, "GET", $token, null);
-if ($res['code']===200) {
+if ($res['code'] === 200) {
     $rencontres = $res['response']['data'] ?? [];
 } else {
     $error   = true;
@@ -112,10 +107,33 @@ if ($res['code']===200) {
   <meta charset="UTF-8">
   <title>Rencontres</title>
   <link rel="stylesheet" href="styles.css">
+
+  <style>
+    /* conteneur flex multi-ligne pour l'affichage des joueurs et notes */
+    .players-grid {
+      display: flex;
+      flex-wrap: wrap;  /* autorise retour à la ligne */
+      gap: 15px 20px;
+      margin-top: 15px;
+    }
+    .player-item {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    .player-item label {
+      font-weight: bold;
+      margin-bottom: 5px;
+    }
+    .player-item input[type="number"] {
+      width: 50px;
+      text-align: center;
+    }
+  </style>
 </head>
 <body>
 
-<!-- Navbar -->
+<!-- Barre de navigation -->
 <div class="navbar">
   <div class="navbar-title">
     <a href="index.php">VolleyCoachPro</a>
@@ -132,7 +150,7 @@ if ($res['code']===200) {
   </div>
 </div>
 
-<?php if($message): ?>
+<?php if ($message): ?>
   <p class="message <?= $error ? 'error-message' : 'info-message' ?>">
     <?= htmlspecialchars($message) ?>
   </p>
@@ -156,21 +174,21 @@ if ($res['code']===200) {
       <tbody>
       <?php
       $now = new DateTime();
-      foreach($rencontres as $r):
+      foreach ($rencontres as $r):
         $dt = new DateTime($r['Date_rencontre']);
         $dateAff = $dt->format('d/m/Y');
         $timeAff = $dt->format('H\hi');
 
-        // calcul setsEq:setsAd
-        $setsEq=0; 
-        $setsAd=0;
-        for($i=1;$i<=5;$i++){
+        // calcul du score setsEq:setsAd
+        $setsEq = 0; 
+        $setsAd = 0;
+        for ($i=1;$i<=5;$i++){
           $se = $r["Set{$i}_equipe"];
           $sa = $r["Set{$i}_adverse"];
-          if($se>$sa) $setsEq++;
-          elseif($sa>$se) $setsAd++;
+          if ($se > $sa) $setsEq++;
+          elseif ($sa > $se) $setsAd++;
         }
-        $scoreTxt = ($setsEq===0 && $setsAd===0)? '—' : ($setsEq." : ".$setsAd);
+        $scoreTxt = ($setsEq === 0 && $setsAd === 0)? '—' : ($setsEq . " : " . $setsAd);
 
         $past = ($dt <= $now);
       ?>
@@ -181,10 +199,10 @@ if ($res['code']===200) {
           <td><?= htmlspecialchars($r['Domicile_ou_exterieur']) ?></td>
           <td><?= htmlspecialchars($scoreTxt) ?></td>
           <td>
-            <?php if($past): ?>
+            <?php if ($past): ?>
               <button class="button-add-score"
                       onclick="openScoreNotesModal(<?= $r['IdRencontre'] ?>)">
-                Accès au Score et aux Notes
+                Accès au Score et Notes
               </button>
             <?php else: ?>
               <span class="button-disabled">Match à venir</span>
@@ -196,11 +214,10 @@ if ($res['code']===200) {
     </table>
   </div>
 
-  <!-- Bouton pour aller a gestion_rencontre.php -->
+  <!-- Bouton pour aller à gestion_rencontre.php -->
   <div class="bottom-button-container" style="margin-bottom: 20px;">
     <a href="gestion_rencontre.php" class="button-manage">Gérer les rencontres</a>
   </div>
-
 </div>
 
 <!-- MODALE SCORE + NOTES -->
@@ -213,7 +230,7 @@ if ($res['code']===200) {
       <input type="hidden" name="action" value="update_score_notes_front">
       <input type="hidden" name="id_rencontre" id="sn_id_rencontre">
 
-      <!-- Les 5 sets -->
+      <!-- 5 sets -->
       <table class="table">
         <thead>
           <tr>
@@ -241,57 +258,9 @@ if ($res['code']===200) {
         </tbody>
       </table>
 
-      <h3 style="margin-top:15px;">Notes par rôle (1 à 5)</h3>
-      <!-- 12 champs, statiques, pour chaque rôle -->
-      <div style="display:flex;flex-wrap:wrap; gap:15px; margin-top:10px;">
-        <label>Avant Gauche (AVG):
-          <input type="number" name="noteAVG" min="1" max="5" value="1">
-        </label>
-
-        <label>Avant Centre (AVC):
-          <input type="number" name="noteAVC" min="1" max="5" value="1">
-        </label>
-
-        <label>Avant Droit (AVD):
-          <input type="number" name="noteAVD" min="1" max="5" value="1">
-        </label>
-
-        <label>Arrière Gauche (ARG):
-          <input type="number" name="noteARG" min="1" max="5" value="1">
-        </label>
-
-        <label>Arrière Droit (ARD):
-          <input type="number" name="noteARD" min="1" max="5" value="1">
-        </label>
-
-        <label>Libéro (LIB):
-          <input type="number" name="noteLIB" min="1" max="5" value="1">
-        </label>
-
-        <label>Remplaçant #1 (R1):
-          <input type="number" name="noteR1" min="1" max="5" value="1">
-        </label>
-
-        <label>Remplaçant #2 (R2):
-          <input type="number" name="noteR2" min="1" max="5" value="1">
-        </label>
-
-        <label>Remplaçant #3 (R3):
-          <input type="number" name="noteR3" min="1" max="5" value="1">
-        </label>
-
-        <label>Remplaçant #4 (R4):
-          <input type="number" name="noteR4" min="1" max="5" value="1">
-        </label>
-
-        <label>Remplaçant #5 (R5):
-          <input type="number" name="noteR5" min="1" max="5" value="1">
-        </label>
-
-        <label>Remplaçant #6 (R6):
-          <input type="number" name="noteR6" min="1" max="5" value="1">
-        </label>
-      </div>
+      <h3 style="margin-top:15px;">Notes Joueurs (1 à 5)</h3>
+      <!-- Chaque joueur = un bloc <div> + <input name="notes[IdJoueur]"> -->
+      <div class="players-grid" id="playersNotesGrid"></div>
 
       <div class="modal-actions" style="margin-top:20px;">
         <button type="submit" class="btn btn-primary">Valider</button>
@@ -304,32 +273,64 @@ if ($res['code']===200) {
 <script>
 // Ouvrir la modale
 function openScoreNotesModal(idR){
+  // ouvre la modale
   document.getElementById('score-notes-modal').style.display='flex';
   document.getElementById('sn_id_rencontre').value = idR;
 
-  // (A) Optionnel : reset sets
+  // reset sets
   for(let i=1;i<=5;i++){
     document.getElementById(`sn_set${i}_equipe`).value=0;
     document.getElementById(`sn_set${i}_adverse`).value=0;
   }
-  // (B) Récup les sets existants => get_sets.php si tu veux, ou laisse tel quel
+  // Récup sets => get_sets.php
   fetch('get_sets.php?id='+idR)
     .then(r=>r.json())
-    .then(obj=>{
-      if(obj.error){
-        console.error(obj.error);
+    .then(data=>{
+      if(data.error){
+        console.error(data.error);
       } else {
         for(let i=1;i<=5;i++){
-          document.getElementById(`sn_set${i}_equipe`).value = obj[`set${i}_equipe`]||0;
-          document.getElementById(`sn_set${i}_adverse`).value= obj[`set${i}_adverse`]||0;
+          document.getElementById(`sn_set${i}_equipe`).value = data[`set${i}_equipe`]||0;
+          document.getElementById(`sn_set${i}_adverse`).value= data[`set${i}_adverse`]||0;
         }
       }
     })
-    .catch(e=>console.error(e));
+    .catch(err=>console.error(err));
 
-  // (C) Optionnel : Récup notes existantes => un endpoint qui renvoie
-  // { noteAVG, noteAVC, ... noteR6 }, si tu veux pré-remplir
-  // Sinon, on laisse tout par défaut =1
+  // Récup joueurs + notes => participants_notes.php
+  // => renvoie [ {IdJoueur, Nom, Prénom, Note}, ... ]
+  const grid = document.getElementById('playersNotesGrid');
+  grid.innerHTML = ""; // reset
+
+  fetch('participants_notes.php?id='+idR)
+    .then(r=>r.json())
+    .then(list=>{
+      if(list.error){
+        console.error(list.error);
+        return;
+      }
+      // On crée un bloc par joueur => <div class="player-item">
+      list.forEach(player=>{
+        // ex: { IdJoueur:12, Nom:"Cobain", Prénom:"Kurt", Note:5 }
+        let item = document.createElement('div');
+        item.className = "player-item";
+
+        let lab = document.createElement('label');
+        lab.textContent = player.Nom + " " + player.Prénom;
+
+        let inp = document.createElement('input');
+        inp.type = "number";
+        inp.name = `notes[${player.IdJoueur}]`; // ex: notes[12]
+        inp.min  = "1";
+        inp.max  = "5";
+        inp.value= (player.Note!==null) ? player.Note : 1;
+
+        item.appendChild(lab);
+        item.appendChild(inp);
+        grid.appendChild(item);
+      });
+    })
+    .catch(err=>console.error(err));
 }
 
 // Fermer la modale
@@ -337,5 +338,6 @@ function closeScoreNotesModal(){
   document.getElementById('score-notes-modal').style.display='none';
 }
 </script>
+
 </body>
 </html>
