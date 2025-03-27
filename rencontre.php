@@ -172,7 +172,7 @@ if($res['code']===200){
           <td><?= htmlspecialchars($scoreTxt) ?></td>
           <td>
             <?php if($past): ?>
-              <button class="button-add-score" onclick="openScoreNotesModal(<?= $r['IdRencontre'] ?>)">Score + Notes</button>
+              <button class="button-add-score" onclick="openScoreNotesModal(<?= $r['IdRencontre'] ?>)">Accès au Score et aux Notes</button>
             <?php else: ?>
               <span class="button-disabled">Match à venir</span>
             <?php endif; ?>
