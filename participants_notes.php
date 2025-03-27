@@ -5,26 +5,23 @@ header('Content-Type: application/json');
 // Vérif session
 if(!isset($_SESSION['user'])){
     http_response_code(403);
-    echo json_encode(["error" => "Accès refusé"]);
+    echo json_encode(["error"=>"Accès refusé (pas de session)"]);
     exit;
 }
 if(!isset($_SESSION['token'])){
     http_response_code(403);
-    echo json_encode(["error" => "Token manquant"]);
+    echo json_encode(["error"=>"Token manquant"]);
     exit;
 }
 $token = $_SESSION['token'];
 
 $idRencontre = isset($_GET['id']) ? (int)$_GET['id'] : 0;
-if($idRencontre <= 0){
+if($idRencontre<=0){
     http_response_code(400);
-    echo json_encode(["error" => "ID invalide"]);
+    echo json_encode(["error"=>"ID de rencontre invalide"]);
     exit;
 }
 
-/**
- * cURL générique
- */
 function sendCurlRequest($url, $method, $token) {
     $ch = curl_init($url);
     curl_setopt($ch, CURLOPT_RETURNTRANSFER,true);
@@ -36,68 +33,76 @@ function sendCurlRequest($url, $method, $token) {
     $resp = curl_exec($ch);
     $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
     curl_close($ch);
-    return [ "code" => $code, "response" => json_decode($resp, true) ];
+    return [
+      "code" => $code,
+      "response" => json_decode($resp, true)
+    ];
 }
 
-// 1) ---- Récupérer la liste de participants => /matchs/equipe/<idRencontre>
+// 1) Récup la liste de participants => /matchs/equipe/<id>
 $api_url_participants = "https://volleycoachpro.alwaysdata.net/volleyapi/matchs/equipe/$idRencontre";
 $resPart = sendCurlRequest($api_url_participants, "GET", $token);
 
-if($resPart['code']!==200) {
+if($resPart['code'] !== 200) {
     http_response_code($resPart['code']);
     echo json_encode([
-        "error"=>"Impossible de récupérer participants (équipe/$idRencontre)",
-        "api_response"=>$resPart['response']
+        "error" => "Impossible de récupérer participants (matchs/equipe/$idRencontre)",
+        "api_response" => $resPart['response']
     ]);
     exit;
 }
 
-$participants = $resPart['response']; // on s’attend à un tableau ex: [ {IdJoueur, IdRencontre, Rôle, Note, ...}, ... ]
-
-if(!is_array($participants)){
-    http_response_code(500);
-    echo json_encode(["error"=>"Réponse inattendue (pas un tableau)"]);
-    exit;
+// --> ICI on prend "data"
+$participantsApi = $resPart['response']['data'] ?? null;
+if(!is_array($participantsApi)){
+    // si data n’existe pas ou pas un tableau => on considère vide
+    $participantsApi = [];
 }
 
-// 2) ---- Pour chaque participant, on va récupérer Nom + Prénom via /joueurs/<IdJoueur>
+// 2) Pour chaque participant, GET /joueurs/{IdJoueur}
 $final = [];
 
-foreach($participants as $p) {
-    // p ex : { "IdJoueur":12, "Note":4, "Rôle":"avant_gauche", ... }
-    $idJoueur = $p['IdJoueur'] ?? 0;
-    if($idJoueur <= 0) {
-        // On skip ce record
-        continue;
-    }
+foreach($participantsApi as $p) {
+    // p = { "IdJoueur":12, "Note":4, ... } etc
+    $idJ = $p['IdJoueur'] ?? 0;
+    if($idJ<=0) continue; // skip
 
-    // appel /joueurs/<idJoueur> => renvoie { "data": { "IdJoueur":12, "Nom":"...", "Prénom":"...", ... } }
-    $api_url_joueur = "https://volleycoachpro.alwaysdata.net/volleyapi/joueurs/$idJoueur";
-    $resJ = sendCurlRequest($api_url_joueur, "GET", $token);
+    $note = isset($p['Note']) ? (int)$p['Note'] : 0;
 
+    // GET /joueurs/<idJ>
+    $urlJoueur = "https://volleycoachpro.alwaysdata.net/volleyapi/joueurs/$idJ";
+    $resJ = sendCurlRequest($urlJoueur, "GET", $token);
     if($resJ['code']===200) {
-        // On suppose la structure = { "status_code":200, "data": {...} }
-        $dataJ = $resJ['response']['data'] ?? null;
-        if($dataJ){
-            // On fusionne Note, IdJoueur, Nom, Prénom, etc.
+        // On récup data
+        $joueur = $resJ['response']['data'] ?? null;
+        if($joueur){
+            $nom    = $joueur['Nom']    ?? "(??)";
+            $prenom = $joueur['Prénom'] ?? "(??)";
             $final[] = [
-                "IdJoueur" => $idJoueur,
-                "Note"     => $p['Note'] ?? 0,
-                "Nom"      => $dataJ['Nom']      ?? "(inconnu)",
-                "Prénom"   => $dataJ['Prénom']   ?? "(inconnu)"
-                // on peut stocker + si besoin
+                "IdJoueur" => $idJ,
+                "Note"     => $note,
+                "Nom"      => $nom,
+                "Prénom"   => $prenom
+            ];
+        } else {
+            // pas de data => on met inconnu
+            $final[] = [
+                "IdJoueur" => $idJ,
+                "Note"     => $note,
+                "Nom"      => "(inconnu)",
+                "Prénom"   => "(inconnu)"
             ];
         }
     } else {
-        // echec => on peut ignorer ou remplir "Nom":"??"
+        // Erreur => on stocke un pseudo
         $final[] = [
-            "IdJoueur" => $idJoueur,
-            "Note"     => $p['Note'] ?? 0,
-            "Nom"      => "(??)",
-            "Prénom"   => "(??)"
+            "IdJoueur" => $idJ,
+            "Note"     => $note,
+            "Nom"      => "(erreur Joueur)",
+            "Prénom"   => "(erreur Joueur)"
         ];
     }
 }
 
-// 3) ---- On renvoie $final en JSON
+// 3) On echo le résultat final
 echo json_encode($final);
