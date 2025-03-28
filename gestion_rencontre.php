@@ -1,6 +1,6 @@
 <?php
 /*****************************************************************************/
-/* GESTION_RENCONTRE.PHP - Version avec la même modale Score+Notes que rencontre.php */
+/* GESTION_RENCONTRE.PHP - Version fonctionnelle similaire à rencontre.php pour notes */
 /*****************************************************************************/
 session_start();
 if (!isset($_SESSION['user'])) {
@@ -78,22 +78,22 @@ if($_SERVER['REQUEST_METHOD']==='POST' && isset($_POST['main_action'])){
 
     // (A) Ajouter une rencontre => POST /matchs/
     if($action==='add_match'){
-        // ...
+        // ... (inchangé) ...
     }
 
     // (B) Modifier l’équipe => PUT /matchs/{id}
     elseif($action==='update_team'){
-        // ...
+        // ... (inchangé) ...
     }
 
     // (C) Modifier Score + Notes => PUT /matchs/{id}
     elseif($action==='update_score_notes'){
-        // ...
+        // ... (inchangé) ...
     }
 
     // (D) Modifier Infos => PUT /matchs/{id}
     elseif($action==='update_info'){
-        // ...
+        // ... (inchangé) ...
     }
 }
 
@@ -101,7 +101,7 @@ if($_SERVER['REQUEST_METHOD']==='POST' && isset($_POST['main_action'])){
 /* 3) Supprimer => DELETE /matchs/{id} */
 /*****************************************************************************/
 if(isset($_GET['action']) && $_GET['action']==='delete'){
-    // ...
+    // ... (inchangé) ...
 }
 
 /*****************************************************************************/
@@ -307,7 +307,8 @@ if($resMatches['code']===200){
 
       <h3 style="margin-top:15px;">Notes Joueurs (1 à 5)</h3>
       <!-- DIV vide, qu’on remplit en JS -->
-      <div style="display:flex;flex-wrap:wrap;gap:10px;" id="upd_score_players"></div>
+      <div id="upd_score_players" class="players-grid"></div>
+
 
       <div class="modal-actions" style="margin-top:20px;">
         <button type="submit" class="btn btn-primary">Valider</button>
@@ -459,65 +460,77 @@ function closeUpdateTeamModal(){
   document.getElementById('update-team-modal').style.display='none';
 }
 
-/** updateScoreNotes => EXACTEMENT comme rencontre.php */
-function updateScoreNotes(idR){
+function updateScoreNotes(idR) {
+  // Fermer la modale du choix
   closeUpdateChoiceModal();
+  
+  // Ouvrir la modale "update-score-modal"
   document.getElementById('update-score-modal').style.display='flex';
-  document.getElementById('upd_score_id_rencontre').value=idR;
+  document.getElementById('upd_score_id_rencontre').value = idR;
 
-  // reset sets
-  for(let i=1;i<=5;i++){
-    document.getElementById(`upd_score_set${i}_equipe`).value=0;
-    document.getElementById(`upd_score_set${i}_adverse`).value=0;
+  // (1) Reset sets
+  for (let i = 1; i <= 5; i++) {
+    document.getElementById(`upd_score_set${i}_equipe`).value = 0;
+    document.getElementById(`upd_score_set${i}_adverse`).value = 0;
   }
 
-  // GET sets => get_sets.php
-  fetch('get_sets.php?id='+idR)
-    .then(r=>r.json())
-    .then(d=>{
-      if(d.error){
+  // (2) Récup sets => get_sets.php
+  fetch('get_sets.php?id=' + idR)
+    .then(r => r.json())
+    .then(d => {
+      if (d.error) {
         console.error(d.error);
       } else {
-        for(let i=1;i<=5;i++){
-          document.getElementById(`upd_score_set${i}_equipe`).value = d[`set${i}_equipe`]||0;
-          document.getElementById(`upd_score_set${i}_adverse`).value= d[`set${i}_adverse`]||0;
+        for (let i = 1; i <= 5; i++) {
+          document.getElementById(`upd_score_set${i}_equipe`).value  = d[`set${i}_equipe`]  || 0;
+          document.getElementById(`upd_score_set${i}_adverse`).value = d[`set${i}_adverse`] || 0;
         }
       }
     })
-    .catch(err=>console.error(err));
+    .catch(err => console.error(err));
 
-  // GET participants_notes => { data:[ {IdJoueur, Nom, Prénom, Note}, ... ] }
-  let cont=document.getElementById('upd_score_players');
-  cont.innerHTML='';
-  fetch('participants_notes.php?id='+idR)
-    .then(r=>r.json())
-    .then(obj=>{
-      if(obj.error){
-        console.error(obj.error);
+  // (3) Récup joueurs + notes => participants_notes.php
+  const cont = document.getElementById('upd_score_players');
+  cont.innerHTML = '';  // Vide d’abord
+  
+  // Assure-toi d’avoir une classe .players-grid dans ton HTML ou CSS :
+  // <div id="upd_score_players" class="players-grid"></div>
+  // .players-grid { display: flex; flex-wrap: wrap; gap: 15px; }
+
+  fetch('participants_notes.php?id=' + idR)
+    .then(r => r.json())
+    .then(list => {
+      if (list.error) {
+        console.error(list.error);
         return;
       }
-      let list = obj.data||[];
-      list.forEach(p=>{
-        // EXACT code "rencontre.php"
-        let wrap=document.createElement('label');
-        wrap.style.display='flex';
-        wrap.style.flexDirection='column';
-        wrap.style.alignItems='center';
-        wrap.textContent = p.Nom+" "+p.Prénom+" :";
+      // Génération des blocs .player-item
+      list.forEach(p => {
+        // conteneur horizontal
+        let wrap = document.createElement('div');
+        wrap.className = 'player-item';
+        // .player-item { display: flex; align-items: center; gap: 8px; }
 
-        let inp=document.createElement('input');
-        inp.type='number';
-        inp.name=`notes[${p.IdJoueur}]`;
-        inp.min='1';
-        inp.max='5';
-        inp.value=(p.Note!==null)? p.Note : 1;
+        // Label
+        let lab = document.createElement('label');
+        lab.textContent = p.Nom + " " + p.Prénom;
 
+        // Input
+        let inp = document.createElement('input');
+        inp.type = 'number';
+        inp.name = `notes[${p.IdJoueur}]`;
+        inp.min  = '1';
+        inp.max  = '5';
+        inp.value = (p.Note !== null) ? p.Note : 1;
+
+        wrap.appendChild(lab);
         wrap.appendChild(inp);
         cont.appendChild(wrap);
       });
     })
-    .catch(err=>console.error(err));
+    .catch(err => console.error(err));
 }
+
 function closeUpdateScoreModal(){
   document.getElementById('update-score-modal').style.display='none';
 }

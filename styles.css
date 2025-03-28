@@ -995,3 +995,19 @@ a.disabled {
     font-size: 0.9rem;
   }
 }
+
+/* Pour le bloc global qui contient tous les joueurs */
+#upd_score_players.players-grid {
+  display: flex;
+  flex-wrap: wrap;   /* Sauter à la ligne si pas assez de place */
+  gap: 20px;         /* Espace entre les “player-item” */
+  margin-top: 15px;
+}
+
+/* Pour chaque joueur */
+.player-item {
+  display: flex;
+  flex-direction: row;   /* Label + input sur la même ligne */
+  align-items: center;
+  gap: 8px;              /* Espace horizontal entre label et input */
+}
