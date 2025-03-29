@@ -223,15 +223,14 @@ if ($res['code'] === 200) {
 <!-- MODALE SCORE + NOTES -->
 <div id="score-notes-modal" class="modal">
   <div class="modal-content modal-content-score-notes">
-    <h2>Modifier Score + Notes</h2>
-    <p id="modalError" class="error-message"></p>
-
-    <form method="POST">
-      <input type="hidden" name="action" value="update_score_notes_front">
-      <input type="hidden" name="id_rencontre" id="sn_id_rencontre">
-
-      <!-- 5 sets -->
-      <table class="table">
+    <div class="modal-header">
+      <h2>Score & Notes</h2>
+      <p id="modalError" class="error-message"></p>
+    </div>
+    
+    <div class="modal-scrollable-content">
+      <!-- 5 sets - Mode lecture seule -->
+      <table class="table score-table">
         <thead>
           <tr>
             <th>Set</th>
@@ -244,29 +243,26 @@ if ($res['code'] === 200) {
           <tr>
             <td><?= $i ?></td>
             <td>
-              <input type="number" name="set<?= $i ?>_equipe"
-                     id="sn_set<?= $i ?>_equipe"
-                     min="0" max="50" value="0">
+              <span id="sn_set<?= $i ?>_equipe_display" class="score-value">0</span>
             </td>
             <td>
-              <input type="number" name="set<?= $i ?>_adverse"
-                     id="sn_set<?= $i ?>_adverse"
-                     min="0" max="50" value="0">
+              <span id="sn_set<?= $i ?>_adverse_display" class="score-value">0</span>
             </td>
           </tr>
           <?php endfor; ?>
         </tbody>
       </table>
 
-      <h3 style="margin-top:15px;">Notes Joueurs (1 à 5)</h3>
-      <!-- Chaque joueur = un bloc <div> + <input name="notes[IdJoueur]"> -->
-      <div class="players-grid" id="playersNotesGrid"></div>
-
-      <div class="modal-actions" style="margin-top:20px;">
-        <button type="submit" class="btn btn-primary">Valider</button>
-        <button type="button" class="btn btn-secondary" onclick="closeScoreNotesModal()">Annuler</button>
+      <h3 class="notes-title">Notes Joueurs</h3>
+      <!-- Conteneur pour les notes en lecture seule -->
+      <div class="players-grid-container">
+        <div class="players-grid" id="playersNotesGrid"></div>
       </div>
-    </form>
+    </div>
+
+    <div class="modal-footer">
+      <button type="button" class="btn btn-back" onclick="closeScoreNotesModal()">Retour</button>
+    </div>
   </div>
 </div>
 
@@ -275,14 +271,14 @@ if ($res['code'] === 200) {
 function openScoreNotesModal(idR){
   // ouvre la modale
   document.getElementById('score-notes-modal').style.display='flex';
-  document.getElementById('sn_id_rencontre').value = idR;
-
-  // reset sets
+  
+  // reset des valeurs
   for(let i=1;i<=5;i++){
-    document.getElementById(`sn_set${i}_equipe`).value=0;
-    document.getElementById(`sn_set${i}_adverse`).value=0;
+    document.getElementById(`sn_set${i}_equipe_display`).textContent='0';
+    document.getElementById(`sn_set${i}_adverse_display`).textContent='0';
   }
-  // Récup sets => get_sets.php
+  
+  // Récupération des sets
   fetch('get_sets.php?id='+idR)
     .then(r=>r.json())
     .then(data=>{
@@ -290,47 +286,47 @@ function openScoreNotesModal(idR){
         console.error(data.error);
       } else {
         for(let i=1;i<=5;i++){
-          document.getElementById(`sn_set${i}_equipe`).value = data[`set${i}_equipe`]||0;
-          document.getElementById(`sn_set${i}_adverse`).value= data[`set${i}_adverse`]||0;
+          document.getElementById(`sn_set${i}_equipe_display`).textContent = data[`set${i}_equipe`]||0;
+          document.getElementById(`sn_set${i}_adverse_display`).textContent= data[`set${i}_adverse`]||0;
         }
       }
     })
     .catch(err=>console.error(err));
 
-  // Récup joueurs + notes => participants_notes.php
-  // => renvoie [ {IdJoueur, Nom, Prénom, Note}, ... ]
+  // Récupération des joueurs + notes
   const grid = document.getElementById('playersNotesGrid');
-  grid.innerHTML = ""; // reset
+  grid.innerHTML = "";
 
   fetch('participants_notes.php?id='+idR)
     .then(r=>r.json())
     .then(list=>{
-      if(list.error){
-        console.error(list.error);
-        return;
-      }
-      // On crée un bloc par joueur => <div class="player-item">
-      list.forEach(player=>{
-        // ex: { IdJoueur:12, Nom:"Cobain", Prénom:"Kurt", Note:5 }
-        let item = document.createElement('div');
-        item.className = "player-item";
-
-        let lab = document.createElement('label');
-        lab.textContent = player.Nom + " " + player.Prénom;
-
-        let inp = document.createElement('input');
-        inp.type = "number";
-        inp.name = `notes[${player.IdJoueur}]`; // ex: notes[12]
-        inp.min  = "1";
-        inp.max  = "5";
-        inp.value= (player.Note!==null) ? player.Note : 1;
-
-        item.appendChild(lab);
-        item.appendChild(inp);
-        grid.appendChild(item);
-      });
+        if(list.error) {
+            console.error(list.error);
+            return;
+        }
+        
+        const grid = document.getElementById('playersNotesGrid');
+        grid.innerHTML = "";
+        
+        list.forEach(player => {
+            const item = document.createElement('div');
+            item.className = "player-item";
+            
+            const lab = document.createElement('label');
+            lab.textContent = `${player.Prénom} ${player.Nom}`;
+            
+            const stars = document.createElement('div');
+            stars.className = "note-stars";
+            const noteValue = player.Note !== null ? Math.max(1, Math.min(5, parseInt(player.Note))) : 0;
+            stars.innerHTML = '★'.repeat(noteValue) + '☆'.repeat(5 - noteValue);
+            stars.title = `Note: ${noteValue}/5`;
+            
+            item.appendChild(lab);
+            item.appendChild(stars);
+            grid.appendChild(item);
+        });
     })
-    .catch(err=>console.error(err));
+    .catch(err => console.error(err));
 }
 
 // Fermer la modale
