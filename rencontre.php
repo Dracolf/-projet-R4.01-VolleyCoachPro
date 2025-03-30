@@ -216,7 +216,12 @@ if ($res['code'] === 200) {
 
   <!-- Bouton pour aller à gestion_rencontre.php -->
   <div class="bottom-button-container" style="margin-bottom: 20px;">
-    <a href="gestion_rencontre.php" class="button-manage">Gérer les rencontres</a>
+    <?php if($_SESSION['user'] !=="guest") {
+      echo '<a href="gestion_rencontre.php" class="button-manage">Gérer les rencontres</a>';
+    } else {
+      echo "<p class='access-restricted'>Vous n'avez pas accès à la gestion des rencontres en tant qu'invité.</p>";
+    }
+    ?>
   </div>
 </div>
 
