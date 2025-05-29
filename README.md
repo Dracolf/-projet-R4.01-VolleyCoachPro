@@ -18,7 +18,7 @@ L'authentification se fait auprès de l’API `https://volleycoachpro.alwaysdata
 ## 🔗 Intégration avec l’API
 
 Toutes les opérations de **CRUD** passent par une **API REST** :  
-📍 `https://volleycoachpro.alwaysdata.net/volleyapi/`
+📍 `https://volleycoachpro.alwaysdata.net/volleyapi/`.
 Pour plus d'informations : `https://github.com/Dracolf/-projet-R4.01-VolleyAPI`
 
 ## 🧪 Fonctionnalités principales
