@@ -1,5 +1,5 @@
 # VolleyCoachPro — Frontend 🎯🏐
-📍 `https://volleycoachpro.alwaysdata.net`
+📍 https://volleycoachpro.alwaysdata.net
 
 Bienvenue sur le dépôt du **frontend** de *VolleyCoachPro*, une application web dédiée à la gestion et au suivi des performances d’une équipe de volley-ball réalisée dans le cadre d'un projet académique.  
 Cette interface permet aux coachs de consulter les joueurs, gérer les rencontres, noter les performances et visualiser les statistiques.
@@ -13,14 +13,14 @@ Cette interface permet aux coachs de consulter les joueurs, gérer les rencontre
 ## 🔐 Authentification
 
 L'accès aux pages de gestion est restreint via session PHP et `Bearer token`.  
-L'authentification se fait auprès de l’API `https://volleycoachpro.alwaysdata.net/authapi/`.
+L'authentification se fait auprès de l’API https://volleycoachpro.alwaysdata.net/authapi/
 
 ## 🔗 Intégration avec l’API
 
 Toutes les opérations de **CRUD** passent par une **API REST** :  
-📍 `https://volleycoachpro.alwaysdata.net/volleyapi/`
+📍 https://volleycoachpro.alwaysdata.net/volleyapi/
 
-Pour plus d'informations : `https://github.com/Dracolf/-projet-R4.01-VolleyAPI`
+Pour plus d'informations : https://github.com/Dracolf/-projet-R4.01-VolleyAPI
 
 ## 🧪 Fonctionnalités principales
 
